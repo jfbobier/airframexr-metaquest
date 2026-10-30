@@ -1,6 +1,6 @@
 use crate::{
     extra_extensions::{
-        self, BodyTrackerFB, EyeTrackerSocial, FaceTracker2FB, MultimodalMeta,
+        BodyTrackerFB, EyeTrackerSocial, FaceTracker2FB, MultimodalMeta,
         BODY_JOINT_SET_FULL_BODY_META, FULL_BODY_JOINT_COUNT_META,
         FULL_BODY_JOINT_LEFT_FOOT_BALL_META, FULL_BODY_JOINT_LEFT_LOWER_LEG_META,
         FULL_BODY_JOINT_RIGHT_FOOT_BALL_META, FULL_BODY_JOINT_RIGHT_LOWER_LEG_META,
@@ -33,28 +33,10 @@ fn get_controller_offset(platform: Platform, is_right_hand: bool) -> Pose {
     const DEG_TO_RAD: f32 = std::f32::consts::PI / 180.0;
 
     let left_offset = match platform {
-        Platform::Quest1 => Pose {
-            position: Vec3::new(-0.013, -0.005, 0.0),
-            orientation: Quat::from_rotation_x(-20.0 * DEG_TO_RAD),
-        },
         // todo: check Quest 2
         p if p.is_quest() => Pose {
             position: Vec3::new(-0.005, -0.005, 0.00),
             orientation: Quat::from_rotation_x(-15.0 * DEG_TO_RAD),
-        },
-        Platform::PicoNeo3 => Pose {
-            position: Vec3::new(-0.013, -0.035, 0.0),
-            orientation: Quat::IDENTITY,
-        },
-        // todo: check (base) Pico 4
-        p if p.is_pico() => Pose {
-            position: Vec3::new(-0.01, -0.035, 0.0),
-            orientation: Quat::from_rotation_y(6.0 * DEG_TO_RAD)
-                * Quat::from_rotation_x(-6.0 * DEG_TO_RAD),
-        },
-        p if p.is_vive() => Pose {
-            position: Vec3::new(0.0, 0.0, -0.02),
-            orientation: Quat::IDENTITY,
         },
         _ => Pose::default(),
     };
@@ -114,7 +96,6 @@ pub struct HandInteraction {
 }
 
 pub struct FaceSources {
-    pub combined_eyes_source: Option<(xr::Action<xr::Posef>, xr::Space)>,
     pub eye_tracker_fb: Option<EyeTrackerSocial>,
     pub face_tracker_fb: Option<FaceTracker2FB>,
 }
@@ -164,8 +145,6 @@ impl InteractionSourcesConfig {
 
 pub struct InteractionContext {
     xr_session: xr::Session<xr::Vulkan>,
-    xr_system: xr::SystemId,
-    extra_extensions: Vec<String>,
     platform: Platform,
     pub action_set: xr::ActionSet,
     pub button_actions: HashMap<u64, ButtonAction>,
@@ -198,19 +177,7 @@ impl InteractionContext {
             xr::Binding::new(action, action.instance().string_to_path(path).unwrap())
         }
 
-        let controllers_profile_path = match platform {
-            p if p.is_quest() => QUEST_CONTROLLER_PROFILE_PATH, // todo: create new controller profile for quest pro and 3
-            Platform::PicoG3 => PICO_G3_CONTROLLER_PROFILE_PATH,
-            Platform::PicoNeo3 => PICO_NEO3_CONTROLLER_PROFILE_PATH,
-            Platform::Pico4Ultra => PICO4S_CONTROLLER_PROFILE_PATH,
-            Platform::Pico4 | Platform::Pico4Pro | Platform::Pico4Enterprise => {
-                PICO4_CONTROLLER_PROFILE_PATH
-            }
-            p if p.is_pico() => PICO4S_CONTROLLER_PROFILE_PATH,
-            p if p.is_vive() => FOCUS3_CONTROLLER_PROFILE_PATH,
-            p if p.is_yvr() => YVR_CONTROLLER_PROFILE_PATH,
-            _ => QUEST_CONTROLLER_PROFILE_PATH,
-        };
+        let controllers_profile_path = QUEST_CONTROLLER_PROFILE_PATH; // todo: create new controller profile for quest pro and 3
         let controllers_profile_id = alvr_common::hash_string(controllers_profile_path);
 
         // Create actions:
@@ -392,46 +359,6 @@ impl InteractionContext {
             false
         };
 
-        // Pico headsets require calling get_system_properties to test for extensions, because all
-        // extensions function pointers are available even if the feature is not supported by the
-        // hardware. The full checks are done in supports_eye_gaze_interaction. This is required
-        // to avoid a crash when requesting the EYE_TRACKING permission.
-        let combined_eyes_source = if !platform.is_quest()
-            && !platform.is_vive()
-            && extra_extensions::supports_eye_gaze_interaction(&xr_session, xr_system)
-        {
-            // todo: research Pico Neo 3 Pro Eye platform detection
-            #[cfg(target_os = "android")]
-            if matches!(
-                platform,
-                Platform::PicoNeo3 | Platform::Pico4Pro | Platform::Pico4Enterprise
-            ) {
-                alvr_system_info::try_get_permission("com.picovr.permission.EYE_TRACKING")
-            }
-
-            let action = action_set
-                .create_action("combined_eye_gaze", "Combined eye gaze", &[])
-                .unwrap();
-
-            let res = xr_instance.suggest_interaction_profile_bindings(
-                xr_instance
-                    .string_to_path("/interaction_profiles/ext/eye_gaze_interaction")
-                    .unwrap(),
-                &[binding(&action, "/user/eyes_ext/input/gaze_ext/pose")],
-            );
-            if res.is_err() {
-                warn!("Failed to register combined eye gaze input: {res:?}");
-            }
-
-            let space = action
-                .create_space(xr_session.clone(), xr::Path::NULL, xr::Posef::IDENTITY)
-                .unwrap();
-
-            Some((action, space))
-        } else {
-            None
-        };
-
         xr_session.attach_action_sets(&[&action_set]).unwrap();
 
         let left_grip_space = left_grip_action
@@ -457,8 +384,6 @@ impl InteractionContext {
 
         Self {
             xr_session,
-            xr_system,
-            extra_extensions,
             platform,
             action_set,
             button_actions,
@@ -489,7 +414,6 @@ impl InteractionContext {
             hand_interaction_bound,
             hands_as_controllers: false,
             face_sources: FaceSources {
-                combined_eyes_source,
                 eye_tracker_fb: None,
                 face_tracker_fb: None,
             },
@@ -527,7 +451,6 @@ impl InteractionContext {
         if let Some(config) = &config.body_tracking {
             if (config.body_tracking_fb.enabled())
                 && self.platform.is_quest()
-                && self.platform != Platform::Quest1
             {
                 #[cfg(target_os = "android")]
                 alvr_system_info::try_get_permission("com.oculus.permission.BODY_TRACKING")
@@ -644,11 +567,9 @@ pub fn get_aim_pose(
 
 pub fn get_head_data(
     xr_session: &xr::Session<xr::Vulkan>,
-    platform: Platform,
     stage_reference_space: &xr::Space,
     view_reference_space: &xr::Space,
     time: Duration,
-    future_time: Duration,
     last_view_params: &[ViewParams; 2],
 ) -> Option<(DeviceMotion, Option<[ViewParams; 2]>)> {
     let xr_time = crate::to_xr_time(time);
@@ -678,7 +599,7 @@ pub fn get_head_data(
         return None;
     }
 
-    let mut motion = DeviceMotion {
+    let motion = DeviceMotion {
         pose: crate::from_xr_pose(head_location.pose),
         linear_velocity: if head_velocity
             .velocity_flags
@@ -697,36 +618,6 @@ pub fn get_head_data(
             Vec3::ZERO
         },
     };
-
-    // Some headsets use wrong frame of reference for linear and angular velocities.
-    if platform.is_pico() || platform.is_vive() || platform.is_yvr() {
-        let xr_future_time = crate::to_xr_time(future_time);
-
-        let predicted_location = view_reference_space
-            .locate(stage_reference_space, xr_future_time)
-            .ok()?;
-
-        if !predicted_location
-            .location_flags
-            .contains(xr::SpaceLocationFlags::ORIENTATION_VALID)
-        {
-            return None;
-        }
-
-        let time_offset = future_time.saturating_sub(time);
-
-        if !time_offset.is_zero() {
-            let time_offset_s = time_offset.as_secs_f32();
-
-            motion.linear_velocity = (crate::from_xr_vec3(predicted_location.pose.position)
-                - motion.pose.position)
-                / time_offset_s;
-            motion.angular_velocity = (crate::from_xr_quat(predicted_location.pose.orientation)
-                * motion.pose.orientation.inverse())
-            .to_scaled_axis()
-                / time_offset_s;
-        }
-    }
 
     let last_ipd_m = last_view_params[0]
         .pose
@@ -752,13 +643,10 @@ pub fn get_head_data(
     Some((motion, view_params))
 }
 
-#[expect(clippy::too_many_arguments)]
 pub fn get_hand_data(
     xr_session: &xr::Session<xr::Vulkan>,
-    platform: Platform,
     reference_space: &xr::Space,
     time: Duration,
-    future_time: Duration,
     hand_source: &HandInteraction,
     last_controller_pose: &mut Pose,
     last_palm_pose: &mut Pose,
@@ -788,39 +676,8 @@ pub fn get_hand_data(
 
             let pose = *last_controller_pose * hand_source.pose_offset;
 
-            let mut linear_velocity = crate::from_xr_vec3(velocity.linear_velocity);
-            let mut angular_velocity = crate::from_xr_vec3(velocity.angular_velocity);
-
-            // Some headsets use wrong frame of reference for linear and angular velocities.
-            if platform.is_pico() || platform.is_vive() {
-                let xr_future_time = crate::to_xr_time(future_time);
-
-                let maybe_future_location = hand_source
-                    .grip_space
-                    .locate(reference_space, xr_future_time);
-
-                if let Ok(future_location) = maybe_future_location {
-                    if future_location.location_flags.contains(
-                        xr::SpaceLocationFlags::ORIENTATION_VALID
-                            | xr::SpaceLocationFlags::POSITION_VALID,
-                    ) {
-                        let time_offset = future_time.saturating_sub(time);
-
-                        if !time_offset.is_zero() {
-                            let time_offset_s = time_offset.as_secs_f32();
-
-                            linear_velocity = (crate::from_xr_vec3(future_location.pose.position)
-                                - last_controller_pose.position)
-                                / time_offset_s;
-                            angular_velocity =
-                                (crate::from_xr_quat(future_location.pose.orientation)
-                                    * last_controller_pose.orientation.inverse())
-                                .to_scaled_axis()
-                                    / time_offset_s;
-                        }
-                    }
-                }
-            }
+            let linear_velocity = crate::from_xr_vec3(velocity.linear_velocity);
+            let angular_velocity = crate::from_xr_vec3(velocity.angular_velocity);
 
             Some(DeviceMotion {
                 pose,
@@ -998,7 +855,6 @@ impl HandTaps {
 }
 
 pub fn get_eye_gazes(
-    xr_session: &xr::Session<xr::Vulkan>,
     sources: &FaceSources,
     reference_space: &xr::Space,
     time: Duration,
@@ -1018,27 +874,7 @@ pub fn get_eye_gazes(
         }
     };
 
-    let Some((eyes_action, eyes_space)) = &sources.combined_eyes_source else {
-        return [None, None];
-    };
-    if !eyes_action
-        .is_active(xr_session, xr::Path::NULL)
-        .unwrap_or(false)
-    {
-        return [None, None];
-    }
-
-    if let Ok(location) = eyes_space.locate(reference_space, xr_time) {
-        [
-            location
-                .location_flags
-                .contains(xr::SpaceLocationFlags::ORIENTATION_TRACKED)
-                .then(|| crate::from_xr_pose(location.pose)),
-            None,
-        ]
-    } else {
-        [None, None]
-    }
+    [None, None]
 }
 
 pub fn get_fb_face_expression(context: &FaceSources, time: Duration) -> Option<Vec<f32>> {

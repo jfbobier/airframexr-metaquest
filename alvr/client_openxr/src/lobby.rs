@@ -12,7 +12,6 @@ use alvr_graphics::{
     panel_hit, BodyTrackingType, GraphicsContext, LobbyPointer, LobbyRenderer, LobbyViewParams,
     PanelButton, PanelState, SDR_FORMAT_VK,
 };
-use alvr_system_info::Platform;
 use openxr as xr;
 use std::{
     rc::Rc,
@@ -49,7 +48,6 @@ struct Pointer {
 pub struct Lobby {
     xr_session: xr::Session<xr::Vulkan>,
     interaction_ctx: Arc<RwLock<InteractionContext>>,
-    platform: Platform,
     reference_space: xr::Space,
     swapchains: [xr::Swapchain<xr::Vulkan>; 2],
     view_resolution: UVec2,
@@ -73,7 +71,6 @@ impl Lobby {
         xr_session: xr::Session<xr::Vulkan>,
         gfx_ctx: Rc<GraphicsContext>,
         interaction_ctx: Arc<RwLock<InteractionContext>>,
-        platform: Platform,
         view_resolution: UVec2,
         initial_hud_message: &str,
     ) -> Self {
@@ -121,7 +118,6 @@ impl Lobby {
         Self {
             xr_session,
             interaction_ctx,
-            platform,
             reference_space,
             swapchains,
             view_resolution,
@@ -283,24 +279,18 @@ impl Lobby {
             .sync_actions(&[(&self.interaction_ctx.read().action_set).into()])
             .ok();
 
-        // future_time doesn't have to be any particular value, just something after vsync_time
-        let future_time = vsync_time + Duration::from_millis(80);
         let left_hand_data = interaction::get_hand_data(
             &self.xr_session,
-            self.platform,
             &self.reference_space,
             vsync_time,
-            future_time,
             &self.interaction_ctx.read().hands_interaction[0],
             &mut Pose::default(),
             &mut Pose::default(),
         );
         let right_hand_data = interaction::get_hand_data(
             &self.xr_session,
-            self.platform,
             &self.reference_space,
             vsync_time,
-            future_time,
             &self.interaction_ctx.read().hands_interaction[1],
             &mut Pose::default(),
             &mut Pose::default(),

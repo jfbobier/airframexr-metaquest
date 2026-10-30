@@ -1,6 +1,5 @@
 use crate::extra_extensions::PassthroughFB;
 use alvr_common::anyhow::{bail, Result};
-use alvr_system_info::Platform;
 use openxr::{self as xr};
 use std::{marker::PhantomData, ops::Deref, ptr};
 
@@ -10,13 +9,13 @@ pub struct PassthroughLayer<'a> {
 }
 
 impl PassthroughLayer<'_> {
-    pub fn new(session: &xr::Session<xr::Vulkan>, platform: Platform) -> Result<Self> {
+    pub fn new(session: &xr::Session<xr::Vulkan>) -> Result<Self> {
         if session.instance().exts().fb_passthrough.is_none() {
             bail!("No passthrough extension available");
         }
 
         Ok(Self {
-            handle_fb: PassthroughFB::new(session, platform)?,
+            handle_fb: PassthroughFB::new(session)?,
             _marker: PhantomData,
         })
     }

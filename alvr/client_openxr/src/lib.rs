@@ -148,7 +148,6 @@ pub fn entry_point() {
     assert!(available_extensions.khr_vulkan_enable2);
 
     let mut exts = xr::ExtensionSet::default();
-    exts.ext_eye_gaze_interaction = available_extensions.ext_eye_gaze_interaction;
     exts.ext_hand_interaction = available_extensions.ext_hand_interaction;
     exts.ext_hand_tracking = available_extensions.ext_hand_tracking;
     exts.ext_local_floor = available_extensions.ext_local_floor;
@@ -281,7 +280,6 @@ pub fn entry_point() {
             xr_session.clone(),
             Rc::clone(&graphics_context),
             Arc::clone(&interaction_context),
-            platform,
             default_view_resolution,
             &last_lobby_message,
         );
@@ -319,7 +317,7 @@ pub fn entry_point() {
 
                             core_context.resume();
 
-                            passthrough_layer = PassthroughLayer::new(&xr_session, platform).ok();
+                            passthrough_layer = PassthroughLayer::new(&xr_session).ok();
 
                             session_running = true;
                         }
@@ -385,7 +383,6 @@ pub fn entry_point() {
                             xr_session.clone(),
                             Rc::clone(&graphics_context),
                             Arc::clone(&interaction_context),
-                            platform,
                             config,
                         );
 
@@ -397,7 +394,7 @@ pub fn entry_point() {
                     }
                     ClientCoreEvent::StreamingStopped => {
                         if passthrough_layer.is_none() {
-                            passthrough_layer = PassthroughLayer::new(&xr_session, platform).ok();
+                            passthrough_layer = PassthroughLayer::new(&xr_session).ok();
                         }
 
                         interaction_context
@@ -434,7 +431,7 @@ pub fn entry_point() {
                     }
                     ClientCoreEvent::RealTimeConfig(config) => {
                         if config.passthrough.is_some() && passthrough_layer.is_none() {
-                            passthrough_layer = PassthroughLayer::new(&xr_session, platform).ok();
+                            passthrough_layer = PassthroughLayer::new(&xr_session).ok();
                         } else if config.passthrough.is_none() && passthrough_layer.is_some() {
                             passthrough_layer = None;
                         }
@@ -496,15 +493,13 @@ pub fn entry_point() {
                 let time = to_xr_time(display_time);
                 error!("End frame failed! {e}, timestamp: {display_time:?}, time: {time:?}");
 
-                if !platform.is_vive() {
-                    xr_frame_stream
-                        .end(
-                            frame_state.predicted_display_time,
-                            xr::EnvironmentBlendMode::OPAQUE,
-                            &[],
-                        )
-                        .unwrap();
-                }
+                xr_frame_stream
+                    .end(
+                        frame_state.predicted_display_time,
+                        xr::EnvironmentBlendMode::OPAQUE,
+                        &[],
+                    )
+                    .unwrap();
             }
         }
     }

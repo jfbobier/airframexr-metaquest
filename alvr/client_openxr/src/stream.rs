@@ -22,7 +22,6 @@ use alvr_session::{
     ClientsideFoveationConfig, ClientsideFoveationMode, ClientsidePostProcessingConfig, CodecType,
     FoveatedEncodingConfig, MediacodecProperty, PassthroughMode, UpscalingConfig,
 };
-use alvr_system_info::Platform;
 use openxr as xr;
 use std::{
     ptr,
@@ -105,7 +104,6 @@ pub struct StreamContext {
     target_view_resolution: UVec2,
     renderer: StreamRenderer,
     decoder: Option<(VideoDecoderConfig, VideoDecoderSource)>,
-    use_custom_reprojection: bool,
 }
 
 impl StreamContext {
@@ -114,7 +112,6 @@ impl StreamContext {
         xr_session: xr::Session<xr::Vulkan>,
         gfx_ctx: Rc<GraphicsContext>,
         interaction_ctx: Arc<RwLock<InteractionContext>>,
-        platform: Platform,
         config: ParsedStreamConfig,
     ) -> StreamContext {
         interaction_ctx
@@ -202,7 +199,7 @@ impl StreamContext {
             ],
             format,
             config.foveated_encoding_config.clone(),
-            platform != Platform::Lynx && !((platform.is_pico()) && config.enable_hdr),
+            true, // sRGB correction in the shader
             config.use_full_range && !config.enable_hdr, // the stream declares BT.709 full range (SDR only); HDR keeps the driver's values like GLES
             config.encoding_gamma,
             config.upscaling.clone(),
@@ -247,7 +244,6 @@ impl StreamContext {
             target_view_resolution,
             renderer,
             decoder: None,
-            use_custom_reprojection: platform.is_yvr(),
         };
 
         this.update_reference_space();
@@ -349,7 +345,6 @@ impl StreamContext {
         frame_interval: Duration,
         vsync_time: Duration,
     ) -> (ProjectionLayerBuilder, Duration) {
-        let xr_vsync_time = xr::Time::from_nanos(vsync_time.as_nanos() as _);
         let frame_poll_deadline = Instant::now()
             + Duration::from_secs_f32(
                 frame_interval.as_secs_f32() * DECODER_MAX_TIMEOUT_MULTIPLIER,
@@ -383,49 +378,16 @@ impl StreamContext {
             .wait_image(xr::Duration::INFINITE)
             .unwrap();
 
-        let (flags, maybe_views) = self
-            .xr_session
-            .locate_views(
-                xr::ViewConfigurationType::PRIMARY_STEREO,
-                xr_vsync_time,
-                &self.stage_reference_space,
-            )
-            .unwrap();
-
-        let current_headset_views = if flags.contains(xr::ViewStateFlags::ORIENTATION_VALID) {
-            maybe_views
-        } else {
-            vec![crate::default_view(), crate::default_view()]
-        };
-
         // The poses and FoVs we received from the PC runtime, which may differ and/or include
         // altered FoVs based on settings and view conversions done for canting.
         let input_view_params = view_params;
-        let mut output_view_params = input_view_params;
+        let output_view_params = input_view_params;
         // Avoid passing invalid timestamp to runtime.
         // `timestamp` is generally a current vsync time, but may be repeated if frames are
         // dropped. Some runtimes dislike it if the timestamp is repeated for too long, so after
         // one second we begin presenting a lagged vsync time instead.
-        let mut openxr_display_time =
+        let openxr_display_time =
             Duration::max(timestamp, vsync_time.saturating_sub(Duration::from_secs(1)));
-
-        // (shinyquagsire23) I don't entirely trust runtimes to implement CompositionLayerProjectionView
-        // correctly, but if we do trust them, avoid doing rotation ourselves. Otherwise, rerender.
-        // Ex: YVR/PFDMR has issues with aspect ratio mismatches and passthrough compositing.
-        if self.use_custom_reprojection {
-            output_view_params = [
-                ViewParams {
-                    pose: crate::from_xr_pose(current_headset_views[0].pose),
-                    fov: crate::from_xr_fov(current_headset_views[0].fov),
-                },
-                ViewParams {
-                    pose: crate::from_xr_pose(current_headset_views[1].pose),
-                    fov: crate::from_xr_fov(current_headset_views[1].fov),
-                },
-            ];
-
-            openxr_display_time = vsync_time;
-        }
 
         unsafe {
             self.renderer.render(
@@ -531,8 +493,6 @@ fn stream_input_loop(
     refresh_rate: f32,
     running: Arc<RelaxedAtomic>,
 ) {
-    let platform = alvr_system_info::platform();
-
     let mut last_controller_poses = [Pose::default(); 2];
     let mut last_palm_poses = [Pose::default(); 2];
     let mut last_view_params = [ViewParams::default(); 2];
@@ -555,15 +515,11 @@ fn stream_input_loop(
             return;
         };
 
-        let target_time = now + core_ctx.get_total_prediction_offset();
-
         let Some((head_motion, local_views)) = interaction::get_head_data(
             &xr_session,
-            platform,
             stage_reference_space,
             view_reference_space,
             now,
-            target_time,
             &last_view_params,
         ) else {
             continue;
@@ -580,20 +536,16 @@ fn stream_input_loop(
 
         let (left_hand_motion, left_hand_skeleton) = crate::interaction::get_hand_data(
             &xr_session,
-            platform,
             stage_reference_space,
             now,
-            target_time,
             &int_ctx.hands_interaction[0],
             &mut last_controller_poses[0],
             &mut last_palm_poses[0],
         );
         let (right_hand_motion, right_hand_skeleton) = crate::interaction::get_hand_data(
             &xr_session,
-            platform,
             stage_reference_space,
             now,
-            target_time,
             &int_ctx.hands_interaction[1],
             &mut last_controller_poses[1],
             &mut last_palm_poses[1],
@@ -622,7 +574,6 @@ fn stream_input_loop(
 
         let face_data = FaceData {
             eye_gazes: interaction::get_eye_gazes(
-                &xr_session,
                 &int_ctx.face_sources,
                 stage_reference_space,
                 now,

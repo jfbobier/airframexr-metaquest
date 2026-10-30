@@ -1,4 +1,3 @@
-use alvr_system_info::Platform;
 use openxr::{self as xr, raw, sys};
 use std::ptr;
 
@@ -10,7 +9,7 @@ pub struct PassthroughFB {
 }
 
 impl PassthroughFB {
-    pub fn new(session: &xr::Session<xr::Vulkan>, platform: Platform) -> xr::Result<Self> {
+    pub fn new(session: &xr::Session<xr::Vulkan>) -> xr::Result<Self> {
         let ext_fns = session
             .instance()
             .exts()
@@ -54,11 +53,6 @@ impl PassthroughFB {
             space: sys::Space::NULL,
             layer_handle,
         };
-
-        // HACK: YVR runtime seems to ignore IS_RUNNING_AT_CREATION on versions <= 3.0.1
-        if platform.is_yvr() {
-            unsafe { super::xr_res((ext_fns.passthrough_start)(handle))? };
-        }
 
         Ok(Self {
             handle,
