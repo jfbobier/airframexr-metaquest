@@ -3,13 +3,48 @@ use crate::{
     graphics::{self, ProjectionLayerAlphaConfig, ProjectionLayerBuilder},
     interaction::{self, InteractionContext},
 };
-use alvr_common::{glam::UVec2, parking_lot::RwLock, Pose};
+use alvr_client_core::HEIGHT_OFFSET_RANGE_CM;
+use alvr_common::{
+    glam::{UVec2, Vec3},
+    parking_lot::RwLock,
+    Pose, LEFT_TRIGGER_VALUE_ID, RIGHT_TRIGGER_VALUE_ID,
+};
 use alvr_graphics::{
-    BodyTrackingType, GraphicsContext, LobbyRenderer, LobbyViewParams, SDR_FORMAT_VK,
+    panel_hit, BodyTrackingType, GraphicsContext, LobbyPointer, LobbyRenderer, LobbyViewParams,
+    PanelButton, PanelState, SDR_FORMAT_VK,
 };
 use alvr_system_info::Platform;
 use openxr as xr;
-use std::{rc::Rc, sync::Arc, time::Duration};
+use std::{
+    rc::Rc,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+// Hand tracking has no trigger: a pinch (thumb tip to index tip) is the click.
+const HAND_JOINT_THUMB_TIP: usize = 5;
+const HAND_JOINT_INDEX_TIP: usize = 10;
+const PINCH_DOWN_DISTANCE: f32 = 0.02;
+const PINCH_UP_DISTANCE: f32 = 0.035;
+// The pinch ray starts at an estimated shoulder and goes through the pinch point
+const SHOULDER_DROP: f32 = 0.20;
+const SHOULDER_SIDE: f32 = 0.17;
+
+const TRIGGER_DOWN: f32 = 0.7;
+const TRIGGER_UP: f32 = 0.4;
+
+// Holding minus or plus repeats it
+const REPEAT_DELAY: Duration = Duration::from_millis(450);
+const REPEAT_INTERVAL: Duration = Duration::from_millis(70);
+// The headset height readout is redrawn at most this often
+const HEIGHT_READOUT_INTERVAL: Duration = Duration::from_millis(250);
+
+struct Pointer {
+    origin: Vec3,
+    hit_point: Vec3,
+    button: Option<PanelButton>,
+    pressed: bool,
+}
 
 // todo: add interaction?
 pub struct Lobby {
@@ -21,6 +56,17 @@ pub struct Lobby {
     view_resolution: UVec2,
     reference_space_type: xr::ReferenceSpaceType,
     renderer: LobbyRenderer,
+
+    // Welcome panel
+    panel_state: PanelState,
+    drawn_panel_state: PanelState,
+    offset_unsaved: bool,
+    active_button: Option<PanelButton>,
+    press_start: Instant,
+    last_repeat: Instant,
+    last_height_readout: Option<Instant>,
+    trigger_down: [bool; 2],
+    pinch_down: [bool; 2],
 }
 
 impl Lobby {
@@ -47,6 +93,12 @@ impl Lobby {
             graphics::create_swapchain(&xr_session, &gfx_ctx, view_resolution, SDR_FORMAT_VK, None),
         ];
 
+        let mut panel_state = PanelState {
+            offset_cm: alvr_client_core::height_offset_cm(),
+            ..Default::default()
+        };
+        panel_state.set_hud_message(initial_hud_message);
+
         let renderer = LobbyRenderer::new(
             gfx_ctx,
             view_resolution,
@@ -64,7 +116,7 @@ impl Lobby {
                     .map(|i| *i as _)
                     .collect(),
             ],
-            initial_hud_message,
+            &panel_state,
         );
 
         Self {
@@ -76,6 +128,15 @@ impl Lobby {
             view_resolution,
             reference_space_type,
             renderer,
+            drawn_panel_state: panel_state.clone(),
+            panel_state,
+            offset_unsaved: false,
+            active_button: None,
+            press_start: Instant::now(),
+            last_repeat: Instant::now(),
+            last_height_readout: None,
+            trigger_down: [false; 2],
+            pinch_down: [false; 2],
         }
     }
 
@@ -84,8 +145,121 @@ impl Lobby {
             interaction::get_reference_space(&self.xr_session, self.reference_space_type);
     }
 
-    pub fn update_hud_message(&self, message: &str) {
-        self.renderer.update_hud_message(message);
+    pub fn update_hud_message(&mut self, message: &str) {
+        self.panel_state.set_hud_message(message);
+    }
+
+    // Whether the controller trigger (with a little hysteresis) is held
+    fn trigger_pressed(&self, hand_idx: usize) -> bool {
+        let id = if hand_idx == 0 {
+            *LEFT_TRIGGER_VALUE_ID
+        } else {
+            *RIGHT_TRIGGER_VALUE_ID
+        };
+
+        let value = match self.interaction_ctx.read().button_actions.get(&id) {
+            Some(interaction::ButtonAction::Scalar(action)) => action
+                .state(&self.xr_session, xr::Path::NULL)
+                .map(|state| state.current_state)
+                .unwrap_or(0.0),
+            _ => 0.0,
+        };
+
+        if self.trigger_down[hand_idx] {
+            value > TRIGGER_UP
+        } else {
+            value > TRIGGER_DOWN
+        }
+    }
+
+    // Moves the height offset by one step or resets it; true if something changed
+    fn apply_button(&mut self, button: PanelButton) {
+        let new_offset = match button {
+            PanelButton::Minus => self.panel_state.offset_cm - 1,
+            PanelButton::Plus => self.panel_state.offset_cm + 1,
+            PanelButton::Reset => 0,
+        }
+        .clamp(
+            *HEIGHT_OFFSET_RANGE_CM.start(),
+            *HEIGHT_OFFSET_RANGE_CM.end(),
+        );
+
+        if new_offset != self.panel_state.offset_cm {
+            self.panel_state.offset_cm = new_offset;
+            self.offset_unsaved = true;
+        }
+    }
+
+    // Pointing rays of the controllers (aim pose, trigger) and of the tracked hands (pinch), each
+    // with the panel button it lands on. `head` is the eye position, used to place the shoulders.
+    fn pointers(
+        &mut self,
+        vsync_time: Duration,
+        head: Pose,
+        hand_data: &[(Option<alvr_common::DeviceMotion>, Option<[Pose; 26]>); 2],
+    ) -> Vec<Pointer> {
+        let mut pointers = vec![];
+
+        for hand_idx in 0..2 {
+            // Controller
+            let aim_pose = interaction::get_aim_pose(
+                &self.xr_session,
+                &self.reference_space,
+                vsync_time,
+                &self.interaction_ctx.read().hands_interaction[hand_idx],
+            );
+            let trigger = self.trigger_pressed(hand_idx);
+            self.trigger_down[hand_idx] = trigger;
+            // A controller that is not held (multimodal) still has a pose but the hand is the pointer
+            if let (Some(pose), true) = (aim_pose, hand_data[hand_idx].1.is_none()) {
+                let dir = pose.orientation * -Vec3::Z;
+                if let Some(hit) = panel_hit(pose.position, dir) {
+                    pointers.push(Pointer {
+                        origin: pose.position,
+                        hit_point: hit.point,
+                        button: hit.button,
+                        pressed: trigger,
+                    });
+                }
+            }
+
+            // Hand
+            if let Some(joints) = &hand_data[hand_idx].1 {
+                let thumb = joints[HAND_JOINT_THUMB_TIP].position;
+                let index = joints[HAND_JOINT_INDEX_TIP].position;
+                let distance = thumb.distance(index);
+                let pinching = if self.pinch_down[hand_idx] {
+                    distance < PINCH_UP_DISTANCE
+                } else {
+                    distance < PINCH_DOWN_DISTANCE
+                };
+                self.pinch_down[hand_idx] = pinching;
+
+                let pinch_point = (thumb + index) / 2.0;
+                let mut right = head.orientation * Vec3::X;
+                right.y = 0.0;
+                let side = if hand_idx == 0 {
+                    -SHOULDER_SIDE
+                } else {
+                    SHOULDER_SIDE
+                };
+                let shoulder =
+                    head.position + Vec3::new(0.0, -SHOULDER_DROP, 0.0) + right.normalize_or_zero() * side;
+
+                if let Some(hit) = panel_hit(pinch_point, pinch_point - shoulder) {
+                    pointers.push(Pointer {
+                        origin: pinch_point,
+                        hit_point: hit.point,
+                        button: hit.button,
+                        pressed: pinching,
+                    });
+                }
+            } else {
+                self.pinch_down[hand_idx] = false;
+            }
+        }
+
+        pointers
     }
 
     pub fn render(&mut self, vsync_time: Duration) -> ProjectionLayerBuilder {
@@ -179,6 +353,74 @@ impl Lobby {
             }
         };
 
+        // Welcome panel: pointing, clicking, the height offset
+        let head = Pose {
+            position: (crate::from_xr_pose(views[0].pose).position
+                + crate::from_xr_pose(views[1].pose).position)
+                / 2.0,
+            orientation: crate::from_xr_pose(views[0].pose).orientation,
+        };
+        let pointers = self.pointers(vsync_time, head, &[left_hand_data.clone(), right_hand_data.clone()]);
+
+        // The pointer that presses a button wins, then the first one on the panel
+        let chosen = pointers
+            .iter()
+            .find(|p| p.pressed && p.button.is_some())
+            .or_else(|| pointers.iter().find(|p| p.button.is_some()))
+            .or(pointers.first());
+
+        let pressed_button = chosen.and_then(|p| p.pressed.then_some(p.button).flatten());
+        let now = Instant::now();
+        match pressed_button {
+            Some(button) if self.active_button != Some(button) => {
+                self.active_button = Some(button);
+                self.press_start = now;
+                self.last_repeat = now;
+                self.apply_button(button);
+            }
+            Some(button) => {
+                if button != PanelButton::Reset
+                    && now.duration_since(self.press_start) > REPEAT_DELAY
+                    && now.duration_since(self.last_repeat) > REPEAT_INTERVAL
+                {
+                    self.last_repeat = now;
+                    self.apply_button(button);
+                }
+            }
+            None => self.active_button = None,
+        }
+
+        // Saved when the button is let go, so the next game start reads it
+        if self.offset_unsaved && self.active_button.is_none() {
+            alvr_client_core::set_height_offset_cm(self.panel_state.offset_cm);
+            self.offset_unsaved = false;
+        }
+
+        if flags.contains(xr::ViewStateFlags::POSITION_VALID | xr::ViewStateFlags::ORIENTATION_VALID)
+            && self
+                .last_height_readout
+                .is_none_or(|t| now.duration_since(t) > HEIGHT_READOUT_INTERVAL)
+        {
+            self.last_height_readout = Some(now);
+            self.panel_state.headset_height_cm = Some((head.position.y * 100.0).round() as i32);
+        }
+        self.panel_state.hovered = chosen.and_then(|p| p.button);
+        self.panel_state.pressed = pressed_button;
+
+        if self.panel_state != self.drawn_panel_state {
+            self.renderer.update_panel(&self.panel_state);
+            self.drawn_panel_state = self.panel_state.clone();
+        }
+
+        let lobby_pointers = pointers
+            .iter()
+            .map(|p| LobbyPointer {
+                origin: p.origin,
+                end: p.hit_point,
+                pressed: p.pressed,
+            })
+            .collect::<Vec<_>>();
+
         let left_swapchain_idx = self.swapchains[0].acquire_image().unwrap();
         let right_swapchain_idx = self.swapchains[1].acquire_image().unwrap();
 
@@ -206,6 +448,7 @@ impl Lobby {
             additional_motions,
             body_skeleton,
             body_tracking_type,
+            &lobby_pointers,
             false,
             cfg!(debug_assertions),
         );

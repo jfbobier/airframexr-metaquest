@@ -107,9 +107,7 @@ pub struct HandInteraction {
     pub grip_action: xr::Action<xr::Posef>,
     pub grip_space: xr::Space,
 
-    #[expect(dead_code)]
     pub aim_action: xr::Action<xr::Posef>,
-    #[expect(dead_code)]
     pub aim_space: xr::Space,
 
     pub vibration_action: xr::Action<xr::Haptic>,
@@ -623,9 +621,56 @@ pub fn get_reference_space(
     xr_session: &xr::Session<xr::Vulkan>,
     ty: xr::ReferenceSpaceType,
 ) -> xr::Space {
+    get_offset_reference_space(xr_session, ty, 0.0)
+}
+
+/// A reference space whose origin is `height_offset_m` lower, so every pose located in it is that
+/// much higher: the user's floor height offset. Views, hands and the submitted layer must all use
+/// the same space, then the picture does not move and only the game sees the shifted heights.
+pub fn get_offset_reference_space(
+    xr_session: &xr::Session<xr::Vulkan>,
+    ty: xr::ReferenceSpaceType,
+    height_offset_m: f32,
+) -> xr::Space {
     xr_session
-        .create_reference_space(ty, xr::Posef::IDENTITY)
+        .create_reference_space(
+            ty,
+            xr::Posef {
+                orientation: xr::Quaternionf::IDENTITY,
+                position: xr::Vector3f {
+                    x: 0.0,
+                    y: -height_offset_m,
+                    z: 0.0,
+                },
+            },
+        )
         .unwrap()
+}
+
+/// The pointing pose of a controller (the aim pose, -Z forward), if it is tracked.
+pub fn get_aim_pose(
+    xr_session: &xr::Session<xr::Vulkan>,
+    reference_space: &xr::Space,
+    time: Duration,
+    hand_source: &HandInteraction,
+) -> Option<Pose> {
+    if !hand_source
+        .aim_action
+        .is_active(xr_session, xr::Path::NULL)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    let location = hand_source
+        .aim_space
+        .locate(reference_space, crate::to_xr_time(time))
+        .ok()?;
+
+    location
+        .location_flags
+        .contains(xr::SpaceLocationFlags::ORIENTATION_VALID | xr::SpaceLocationFlags::POSITION_VALID)
+        .then(|| crate::from_xr_pose(location.pose))
 }
 
 pub fn get_head_data(

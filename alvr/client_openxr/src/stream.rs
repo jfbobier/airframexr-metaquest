@@ -10,6 +10,7 @@ use alvr_common::{
     anyhow::Result,
     error,
     glam::{UVec2, Vec2},
+    info,
     parking_lot::RwLock,
     Pose, RelaxedAtomic, ViewParams, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID,
 };
@@ -93,6 +94,9 @@ pub struct StreamContext {
     interaction_context: Arc<RwLock<InteractionContext>>,
     stage_reference_space: Arc<xr::Space>,
     view_reference_space: Arc<xr::Space>,
+    // The user's floor height offset (welcome panel), read when the stream starts and kept for its
+    // whole duration: the stage space is lowered by it, see `interaction::get_offset_reference_space`
+    height_offset_m: f32,
     swapchains: [xr::Swapchain<xr::Vulkan>; 2],
     last_good_view_params: [ViewParams; 2],
     input_thread: Option<JoinHandle<()>>,
@@ -215,9 +219,13 @@ impl StreamContext {
 
         let input_thread_running = Arc::new(RelaxedAtomic::new(false));
 
-        let stage_reference_space = Arc::new(interaction::get_reference_space(
+        let height_offset_m = alvr_client_core::height_offset_cm() as f32 / 100.0;
+        info!("Floor height offset: {height_offset_m} m");
+
+        let stage_reference_space = Arc::new(interaction::get_offset_reference_space(
             &xr_session,
             xr::ReferenceSpaceType::STAGE,
+            height_offset_m,
         ));
         let view_reference_space = Arc::new(interaction::get_reference_space(
             &xr_session,
@@ -230,6 +238,7 @@ impl StreamContext {
             interaction_context: interaction_ctx,
             stage_reference_space,
             view_reference_space,
+            height_offset_m,
             swapchains,
             last_good_view_params: [ViewParams::default(); 2],
             input_thread: None,
@@ -253,9 +262,10 @@ impl StreamContext {
     pub fn update_reference_space(&mut self) {
         self.input_thread_running.set(false);
 
-        self.stage_reference_space = Arc::new(interaction::get_reference_space(
+        self.stage_reference_space = Arc::new(interaction::get_offset_reference_space(
             &self.xr_session,
             xr::ReferenceSpaceType::STAGE,
+            self.height_offset_m,
         ));
         self.view_reference_space = Arc::new(interaction::get_reference_space(
             &self.xr_session,
