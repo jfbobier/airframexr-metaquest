@@ -37,17 +37,6 @@ use std::{
 };
 use wgpu::{hal::api, CommandEncoder, Maintain, Texture};
 
-// An import problem: same error! as before, plus the always-visible diagnostics channel and the counter
-// of the 1 Hz summary (the frame is repeated, see the callers).
-macro_rules! staging_error {
-    ($($arg:tt)*) => {{
-        let message = format!($($arg)*);
-        error!("{message}");
-        alvr_common::diag!("[staging-error] {message}");
-        alvr_common::diag::STAGING_FAILURES.inc();
-    }};
-}
-
 const VERTEX_SHADER: &[u8] = include_bytes!("../resources/staging_vertex.spv");
 const FRAGMENT_SHADER: &[u8] = include_bytes!("../resources/staging_fragment.spv");
 
@@ -60,7 +49,6 @@ fn ck<T>(result: ash::prelude::VkResult<T>, what: &str) -> T {
         Ok(value) => value,
         Err(e) => {
             error!("Vulkan error in {what}: {e:?}");
-            alvr_common::diag!("[vk-error] {what}: {e:?} (about to panic)");
             panic!("Vulkan error in {what}: {e:?}");
         }
     }
@@ -79,19 +67,6 @@ fn describe_buffer(buffer: *mut c_void) -> (u32, u32) {
     let mut desc = unsafe { std::mem::zeroed::<ndk_sys::AHardwareBuffer_Desc>() };
     unsafe { ndk_sys::AHardwareBuffer_describe(buffer.cast(), &mut desc) };
     (desc.width, desc.height)
-}
-
-/// width, height, layers, AHARDWAREBUFFER_FORMAT_*, usage flags, stride (diagnostics)
-#[cfg(target_os = "android")]
-fn describe_buffer_full(buffer: *mut c_void) -> (u32, u32, u32, u32, u64, u32) {
-    let mut desc = unsafe { std::mem::zeroed::<ndk_sys::AHardwareBuffer_Desc>() };
-    unsafe { ndk_sys::AHardwareBuffer_describe(buffer.cast(), &mut desc) };
-    (desc.width, desc.height, desc.layers, desc.format, desc.usage, desc.stride)
-}
-
-#[cfg(not(target_os = "android"))]
-fn describe_buffer_full(_buffer: *mut c_void) -> (u32, u32, u32, u32, u64, u32) {
-    unimplemented!("AHardwareBuffer is Android only")
 }
 
 #[cfg(not(target_os = "android"))]
@@ -583,7 +558,7 @@ impl StagingRenderer {
             hardware_buffer.cast::<vk::AHardwareBuffer>().cast_const(),
             &mut buffer_properties,
         ) {
-            staging_error!("vkGetAndroidHardwareBufferPropertiesANDROID failed: {e:?}, repeating frame");
+            error!("vkGetAndroidHardwareBufferPropertiesANDROID failed: {e:?}, repeating frame");
             return;
         }
         let allocation_size = buffer_properties.allocation_size;
@@ -636,30 +611,6 @@ impl StagingRenderer {
                 format_properties.suggested_ycbcr_model,
                 format_properties.suggested_ycbcr_range
             );
-            let (w, h, layers, format, usage, stride) = describe_buffer_full(hardware_buffer);
-            alvr_common::diag!(
-                "[staging] decoder buffer: {w}x{h} layers {layers} stride {stride} AHB format 0x{format:x} usage 0x{usage:x}; \
-                 vk format {:?} external_format 0x{:x} features {:?}",
-                format_properties.format,
-                format_properties.external_format,
-                format_properties.format_features
-            );
-            alvr_common::diag!(
-                "[staging] YCbCr conversion: applied model {:?} range {:?} (driver suggested model {:?} range {:?}, forced={}); \
-                 chroma offsets x {:?} y {:?}, linear chroma filter {}, components r {:?} g {:?} b {:?} a {:?}",
-                vk::SamplerYcbcrModelConversion::from_raw(key.model),
-                vk::SamplerYcbcrRange::from_raw(key.range),
-                format_properties.suggested_ycbcr_model,
-                format_properties.suggested_ycbcr_range,
-                self.declared_full_range_bt709,
-                format_properties.suggested_x_chroma_offset,
-                format_properties.suggested_y_chroma_offset,
-                key.linear_chroma_filter,
-                format_properties.sampler_ycbcr_conversion_components.r,
-                format_properties.sampler_ycbcr_conversion_components.g,
-                format_properties.sampler_ycbcr_conversion_components.b,
-                format_properties.sampler_ycbcr_conversion_components.a
-            );
 
             // Frames in flight reference the old objects
             self.wait_for_gpu();
@@ -711,7 +662,7 @@ impl StagingRenderer {
         let image = match self.device.create_image(&image_info, None) {
             Ok(image) => image,
             Err(e) => {
-                staging_error!("vkCreateImage (AHardwareBuffer) failed: {e:?}, repeating frame");
+                error!("vkCreateImage (AHardwareBuffer) failed: {e:?}, repeating frame");
                 return;
             }
         };
@@ -724,7 +675,7 @@ impl StagingRenderer {
                     .contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)
             });
         let Some(memory_type_index) = memory_type_index else {
-            staging_error!("No memory type for the AHardwareBuffer, repeating frame");
+            error!("No memory type for the AHardwareBuffer, repeating frame");
             self.device.destroy_image(image, None);
             return;
         };
@@ -742,13 +693,13 @@ impl StagingRenderer {
         ) {
             Ok(memory) => memory,
             Err(e) => {
-                staging_error!("vkAllocateMemory (AHardwareBuffer import) failed: {e:?}, repeating frame");
+                error!("vkAllocateMemory (AHardwareBuffer import) failed: {e:?}, repeating frame");
                 self.device.destroy_image(image, None);
                 return;
             }
         };
         if let Err(e) = self.device.bind_image_memory(image, memory, 0) {
-            staging_error!("vkBindImageMemory failed: {e:?}, repeating frame");
+            error!("vkBindImageMemory failed: {e:?}, repeating frame");
             self.device.destroy_image(image, None);
             self.device.free_memory(memory, None);
             return;
@@ -767,7 +718,7 @@ impl StagingRenderer {
         ) {
             Ok(view) => view,
             Err(e) => {
-                staging_error!("vkCreateImageView (AHardwareBuffer) failed: {e:?}, repeating frame");
+                error!("vkCreateImageView (AHardwareBuffer) failed: {e:?}, repeating frame");
                 self.device.destroy_image(image, None);
                 self.device.free_memory(memory, None);
                 return;
@@ -782,7 +733,7 @@ impl StagingRenderer {
         ) {
             Ok(sets) => sets[0],
             Err(e) => {
-                staging_error!("vkAllocateDescriptorSets failed: {e:?}, repeating frame");
+                error!("vkAllocateDescriptorSets failed: {e:?}, repeating frame");
                 self.device.destroy_image_view(view, None);
                 self.device.destroy_image(image, None);
                 self.device.free_memory(memory, None);
@@ -806,7 +757,6 @@ impl StagingRenderer {
         let id = inner.next_id;
         inner.next_id += 1;
         inner.last_recorded_id = Some(id);
-        alvr_common::diag::STAGING_IMPORTS.inc();
         inner.frames.push(FrameResources {
             id,
             image,
