@@ -55,7 +55,6 @@ FLAGS:
     --no-stdcpp         Disable linking to libc++_shared with build-client-lib
     --all-targets       For prepare-deps and build-client-lib subcommand, will build for all android supported ABI targets
     --meta-store        For package-client subcommand, build for Meta Store
-    --pico-store        For package-client subcommand, build for Pico Store
 
 ARGS:
     --platform <NAME>   Can be one of: windows, linux, macos, android. Can be omitted
@@ -198,8 +197,6 @@ fn main() {
 
         let package_flavor = if args.contains("--meta-store") {
             ReleaseFlavor::MetaStore
-        } else if args.contains("--pico-store") {
-            ReleaseFlavor::PicoStore
         } else {
             ReleaseFlavor::GitHub
         };

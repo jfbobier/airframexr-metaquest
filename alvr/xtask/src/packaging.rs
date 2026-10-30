@@ -9,7 +9,6 @@ use xshell::{cmd, Shell};
 pub enum ReleaseFlavor {
     GitHub,
     MetaStore,
-    PicoStore,
 }
 
 pub fn include_licenses(root_path: &Path, gpl: bool) {
