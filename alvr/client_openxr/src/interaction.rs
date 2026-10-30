@@ -1018,6 +1018,11 @@ pub fn update_buttons(
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(900);
 const DOUBLE_TAP_MAX_PINCH: Duration = Duration::from_millis(600);
 const DOUBLE_TAP_PULSE: Duration = Duration::from_millis(150);
+// A pinch is read from the trigger value with the mirror's own thresholds (mirrordesktop.cpp: "a hand's pinch or a
+// trigger rarely reaches 1: the button goes down at 0.3 and up at 0.15"). The runtime's boolean click needs a much
+// stronger pinch, so most pinches the mirror counts as a click never reached it and no double pinch was detected.
+const PINCH_DOWN: f32 = 0.3;
+const PINCH_UP: f32 = 0.15;
 
 #[derive(Default, Clone, Copy)]
 struct HandTap {
@@ -1033,7 +1038,7 @@ pub struct HandTaps([HandTap; 2]);
 
 impl HandTaps {
     /// `hand_driven`: the hand is tracked without a controller (the pinch is read from the trigger
-    /// click, which the hand interaction profile drives); with controllers nothing is emulated.
+    /// value, which the hand interaction profile drives); with controllers nothing is emulated.
     pub fn update(
         &mut self,
         xr_session: &xr::Session<xr::Vulkan>,
@@ -1044,20 +1049,22 @@ impl HandTaps {
         let mut entries = vec![];
 
         for (h, tap) in self.0.iter_mut().enumerate() {
-            let (trigger_click_id, button_id) = if h == 0 {
-                (*LEFT_TRIGGER_CLICK_ID, *LEFT_X_CLICK_ID)
+            let (trigger_value_id, button_id) = if h == 0 {
+                (*LEFT_TRIGGER_VALUE_ID, *LEFT_X_CLICK_ID)
             } else {
-                (*RIGHT_TRIGGER_CLICK_ID, *RIGHT_A_CLICK_ID)
+                (*RIGHT_TRIGGER_VALUE_ID, *RIGHT_A_CLICK_ID)
             };
 
-            let down = hand_driven[h]
-                && matches!(
-                    button_actions.get(&trigger_click_id),
-                    Some(ButtonAction::Binary(action))
-                        if action
-                            .state(xr_session, xr::Path::NULL)
-                            .is_ok_and(|s| s.is_active && s.current_state)
-                );
+            let pinch = match button_actions.get(&trigger_value_id) {
+                Some(ButtonAction::Scalar(action)) if hand_driven[h] => action
+                    .state(xr_session, xr::Path::NULL)
+                    .ok()
+                    .filter(|s| s.is_active)
+                    .map(|s| s.current_state),
+                _ => None,
+            };
+            // down at PINCH_DOWN, up at PINCH_UP (hysteresis, like the mirror)
+            let down = pinch.is_some_and(|v| if tap.down { v > PINCH_UP } else { v >= PINCH_DOWN });
 
             if down && !tap.down {
                 if let (Some(began), Some(ended)) = (tap.began_at, tap.ended_at) {
