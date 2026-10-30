@@ -699,6 +699,22 @@ pub fn get_meta_index_pinch(
     .then(|| status.contains(xr::HandTrackingAimFlagsFB::INDEX_PINCHING))
 }
 
+/// The hand's aim pose (the runtime's own pointing ray), for the hand diagnostics.
+pub fn get_hand_aim_pose(
+    reference_space: &xr::Space,
+    time: Duration,
+    hand_source: &HandInteraction,
+) -> Option<Pose> {
+    let location = hand_source
+        .aim_space
+        .locate(reference_space, crate::to_xr_time(time))
+        .ok()?;
+    location
+        .location_flags
+        .contains(xr::SpaceLocationFlags::ORIENTATION_VALID | xr::SpaceLocationFlags::POSITION_VALID)
+        .then(|| crate::from_xr_pose(location.pose))
+}
+
 pub fn get_hand_data(
     xr_session: &xr::Session<xr::Vulkan>,
     reference_space: &xr::Space,
@@ -916,6 +932,14 @@ impl HandTaps {
             }
             // the clean trigger for a free hand (and one last release when the hand stops being hand-driven)
             if down != tap.down {
+                // TEMPORARY diagnostics (warn level so they pass the streamer's log filter): one line per pinch edge
+                alvr_common::warn!(
+                    "[hands] {} pinch {} meta_bit {:?} value {:?}",
+                    if h == 0 { "left" } else { "right" },
+                    if down { "DOWN" } else { "up" },
+                    meta_pinch[h],
+                    pinch
+                );
                 entries.push(ButtonEntry {
                     path_id: trigger_value_id,
                     value: ButtonValue::Scalar(if down { 1.0 } else { 0.0 }),

@@ -498,6 +498,7 @@ fn stream_input_loop(
     let mut last_palm_poses = [Pose::default(); 2];
     let mut last_view_params = [ViewParams::default(); 2];
     let mut hand_taps = interaction::HandTaps::default();
+    let mut hand_diag_at = Instant::now();
 
     let mut deadline = Instant::now();
     let frame_interval = Duration::from_secs_f32(1.0 / refresh_rate);
@@ -626,6 +627,36 @@ fn stream_input_loop(
                 })
                 .flatten()
         });
+        // TEMPORARY diagnostics: once a second, for a free hand, how far the pose sent to the host is from the runtime's
+        // own aim ray (a left/right difference would show here)
+        if hand_diag_at.elapsed() >= Duration::from_secs(1) {
+            hand_diag_at = Instant::now();
+            for (h, (name, motion)) in [("left", left_hand_motion), ("right", right_hand_motion)]
+                .into_iter()
+                .enumerate()
+            {
+                if !hand_driven[h] {
+                    continue;
+                }
+                let aim =
+                    interaction::get_hand_aim_pose(stage_reference_space, now, &int_ctx.hands_interaction[h]);
+                if let (Some(sent), Some(aim)) = (motion.map(|m| m.pose), aim) {
+                    let relative = aim.orientation.inverse() * sent.orientation;
+                    let (yaw, pitch, roll) = relative.to_euler(alvr_common::glam::EulerRot::YXZ);
+                    let forward_gap = (sent.orientation * alvr_common::glam::Vec3::NEG_Z)
+                        .angle_between(aim.orientation * alvr_common::glam::Vec3::NEG_Z);
+                    alvr_common::warn!(
+                        "[hands] {name} sent vs aim: yaw {:.0} pitch {:.0} roll {:.0} deg, forward gap {:.0} deg, position gap {:.1} cm, meta pinch {:?}",
+                        yaw.to_degrees(),
+                        pitch.to_degrees(),
+                        roll.to_degrees(),
+                        forward_gap.to_degrees(),
+                        (sent.position - aim.position).length() * 100.0,
+                        meta_pinch[h]
+                    );
+                }
+            }
+        }
         button_entries.extend(hand_taps.update(
             &xr_session,
             &int_ctx.button_actions,
