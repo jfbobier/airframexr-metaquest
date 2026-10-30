@@ -615,10 +615,14 @@ fn stream_input_loop(
             let raw_right_pinch = hand_driven[1] && (id == right_value || id == right_click);
             !(raw_left_pinch || raw_right_pinch)
         });
+        // a closed hand is not a pinch (thumb and index touch in a fist)
+        let fingertip_distances = [left_hand_skeleton, right_hand_skeleton]
+            .map(|joints| joints.as_ref().map(interaction::fingertip_palm_distances));
+        let fist = fingertip_distances.map(|d| d.is_some_and(interaction::is_fist));
         let meta_pinch = [0, 1].map(|h| {
             hand_driven[h]
                 .then(|| {
-                    interaction::get_meta_index_pinch(
+                    interaction::get_meta_pinch(
                         &xr_session,
                         stage_reference_space,
                         now,
@@ -645,13 +649,15 @@ fn stream_input_loop(
                     let (yaw, pitch, roll) = relative.to_euler(alvr_common::glam::EulerRot::YXZ);
                     let forward_gap = (sent.orientation * alvr_common::glam::Vec3::NEG_Z)
                         .angle_between(aim.orientation * alvr_common::glam::Vec3::NEG_Z);
-                    alvr_common::warn!(
-                        "[hands] {name} sent vs aim: yaw {:.0} pitch {:.0} roll {:.0} deg, forward gap {:.0} deg, position gap {:.1} cm, meta pinch {:?}",
+                    alvr_common::error!(
+                        "[hands] {name} sent vs aim: yaw {:.0} pitch {:.0} roll {:.0} deg, forward gap {:.0} deg, position gap {:.1} cm, fist {} tip-palm m {:?}, meta pinch {:?}",
                         yaw.to_degrees(),
                         pitch.to_degrees(),
                         roll.to_degrees(),
                         forward_gap.to_degrees(),
                         (sent.position - aim.position).length() * 100.0,
+                        fist[h],
+                        fingertip_distances[h],
                         meta_pinch[h]
                     );
                 }
@@ -662,6 +668,7 @@ fn stream_input_loop(
             &int_ctx.button_actions,
             hand_driven,
             meta_pinch,
+            fist,
             Instant::now(),
         ));
         if !button_entries.is_empty() {
