@@ -18,6 +18,8 @@ settings and the build system are the work of polygraphene, the alvr-org contrib
 [`README-ALVR.md`](README-ALVR.md) (the unchanged upstream README). Nearly everything that makes this app run is theirs, and
 this fork would not exist without it. ALVR is MIT licensed and so is this fork (see `LICENSE`).
 
+**.BarThi** pushed for this Meta Quest fork with Vulkan, and tested it. Thank you.
+
 The base is `v20.14.1` and not upstream `master` because the AirFrameXR streamer speaks the 20.14.1 protocol, and `master`
 (21.0.0-dev) does not.
 
