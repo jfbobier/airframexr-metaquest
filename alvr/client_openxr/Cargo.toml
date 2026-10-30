@@ -43,7 +43,7 @@ keystore_password = "alvrclient"
 
 [package.metadata.android.sdk]
 min_sdk_version = 26
-target_sdk_version = 32
+target_sdk_version = 34   # Quest 3 runs Android 14 (SDK 34)
 
 [[package.metadata.android.uses_feature]]
 name = "android.hardware.microphone"
