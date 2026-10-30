@@ -155,7 +155,7 @@ impl<'a> ProjectionLayerBuilder<'a> {
         }
     }
 
-    fn layer_flags(&self) -> xr::CompositionLayerFlags {
+    pub fn build(&self) -> xr::CompositionLayerProjection<xr::Vulkan> {
         let mut flags = xr::CompositionLayerFlags::EMPTY;
 
         if let Some(alpha) = &self.alpha {
@@ -165,29 +165,6 @@ impl<'a> ProjectionLayerBuilder<'a> {
                 flags |= xr::CompositionLayerFlags::UNPREMULTIPLIED_ALPHA;
             }
         }
-
-        flags
-    }
-
-    /// What `build()` submits, for the always-visible diagnostics.
-    pub fn describe(&self) -> String {
-        let flags = self.layer_flags();
-        format!(
-            "projection layer flags {flags:?} (0x{:x}), alpha config {}, composition layer settings {}",
-            flags.into_raw(),
-            match &self.alpha {
-                None => "none (opaque)".to_owned(),
-                Some(alpha) => format!("blend source alpha, premultiplied {}", alpha.premultiplied),
-            },
-            match &self.composition_layer_settings {
-                None => "none".to_owned(),
-                Some(settings) => format!("flags 0x{:x}", settings.layer_flags.into_raw()),
-            }
-        )
-    }
-
-    pub fn build(&self) -> xr::CompositionLayerProjection<xr::Vulkan> {
-        let flags = self.layer_flags();
 
         let layer = xr::CompositionLayerProjection::new()
             .layer_flags(flags)

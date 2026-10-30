@@ -328,8 +328,6 @@ pub fn entry_point() {
         let mut session_running = false;
         let mut stream_context = None::<StreamContext>;
         let mut passthrough_layer = None;
-        // (streaming, passthrough layer present) of the last submitted frame, to describe changes only
-        let mut last_layer_signature = None::<(bool, bool)>;
 
         let mut event_storage = xr::EventDataBuffer::new();
         'render_loop: loop {
@@ -339,10 +337,7 @@ pub fn entry_point() {
                         error!("OpenXR: lost {} events!", event.lost_event_count());
                     }
                     xr::Event::InstanceLossPending(_) => break 'session_loop,
-                    xr::Event::SessionStateChanged(event) => match {
-                        alvr_common::diag!("[session] state changed to {:?}", event.state());
-                        event.state()
-                    } {
+                    xr::Event::SessionStateChanged(event) => match event.state() {
                         xr::SessionState::READY => {
                             xr_session
                                 .begin(xr::ViewConfigurationType::PRIMARY_STEREO)
@@ -350,7 +345,7 @@ pub fn entry_point() {
 
                             core_context.resume();
 
-                            passthrough_layer = create_passthrough_layer(&xr_session, platform, "session ready");
+                            passthrough_layer = PassthroughLayer::new(&xr_session, platform).ok();
 
                             session_running = true;
                         }
@@ -389,13 +384,8 @@ pub fn entry_point() {
                             event.sub_domain(),
                         );
                     }
-                    xr::Event::PassthroughStateChangedFB(event) => {
-                        alvr_common::diag!(
-                            "[passthrough] PassthroughStateChangedFB flags {:?}",
-                            event.flags()
-                        );
-                    }
-                    xr::Event::InteractionProfileChanged(_) => {
+                    xr::Event::InteractionProfileChanged(_)
+                    | xr::Event::PassthroughStateChangedFB(_) => {
                         // todo
                     }
                     _ => (),
@@ -433,11 +423,7 @@ pub fn entry_point() {
                     }
                     ClientCoreEvent::StreamingStopped => {
                         if passthrough_layer.is_none() {
-                            passthrough_layer = create_passthrough_layer(
-                                &xr_session,
-                                platform,
-                                "streaming stopped",
-                            );
+                            passthrough_layer = PassthroughLayer::new(&xr_session, platform).ok();
                         }
 
                         interaction_context
@@ -473,18 +459,8 @@ pub fn entry_point() {
                         }
                     }
                     ClientCoreEvent::RealTimeConfig(config) => {
-                        alvr_common::diag!(
-                            "[passthrough] real-time config: {}; passthrough layer present before: {}",
-                            alvr_graphics::passthrough_diag_string(config.passthrough.as_ref()),
-                            passthrough_layer.is_some()
-                        );
-
                         if config.passthrough.is_some() && passthrough_layer.is_none() {
-                            passthrough_layer = create_passthrough_layer(
-                                &xr_session,
-                                platform,
-                                "real-time config",
-                            );
+                            passthrough_layer = PassthroughLayer::new(&xr_session, platform).ok();
                         } else if config.passthrough.is_none() && passthrough_layer.is_some() {
                             passthrough_layer = None;
                         }
@@ -523,24 +499,11 @@ pub fn entry_point() {
             }
 
             // todo: allow rendering lobby and stream layers at the same time and add cross fade
-            let streaming = stream_context.is_some();
             let (layer, display_time) = if let Some(stream) = &mut stream_context {
                 stream.render(frame_interval, vsync_time)
             } else {
                 (lobby.render(vsync_time), vsync_time)
             };
-
-            let layer_signature = (streaming, passthrough_layer.is_some());
-            if last_layer_signature != Some(layer_signature) {
-                last_layer_signature = Some(layer_signature);
-                alvr_common::diag!(
-                    "[layers] submitting {} layer(s), in order: {}{}; blend mode OPAQUE; {}",
-                    if layer_signature.1 { 2 } else { 1 },
-                    if layer_signature.1 { "passthrough (FB/HTC), " } else { "" },
-                    if layer_signature.0 { "stream projection" } else { "lobby projection" },
-                    layer.describe()
-                );
-            }
 
             let layers: &[&xr::CompositionLayerBase<_>] =
                 if let Some(passthrough_layer) = &passthrough_layer {
@@ -573,25 +536,6 @@ pub fn entry_point() {
     }
 
     // grapics_context is dropped here
-}
-
-/// Same as `PassthroughLayer::new(..).ok()`, but a failure leaves a trace in the diagnostics (without
-/// the layer a chroma keyed stream has nothing behind it).
-fn create_passthrough_layer<'a>(
-    xr_session: &xr::Session<xr::Vulkan>,
-    platform: Platform,
-    reason: &str,
-) -> Option<PassthroughLayer<'a>> {
-    match PassthroughLayer::new(xr_session, platform) {
-        Ok(layer) => {
-            alvr_common::diag!("[passthrough] layer created ({reason})");
-            Some(layer)
-        }
-        Err(e) => {
-            alvr_common::diag!("[passthrough] layer creation FAILED ({reason}): {e}");
-            None
-        }
-    }
 }
 
 #[allow(unused)]
