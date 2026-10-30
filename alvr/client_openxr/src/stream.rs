@@ -627,11 +627,9 @@ fn stream_input_loop(
                 stage_reference_space,
                 now,
             ),
-            fb_face_expression: interaction::get_fb_face_expression(&int_ctx.face_sources, now).or(
-                interaction::get_pico_face_expression(&int_ctx.face_sources, now),
-            ),
-            htc_eye_expression: interaction::get_htc_eye_expression(&int_ctx.face_sources, now),
-            htc_lip_expression: interaction::get_htc_lip_expression(&int_ctx.face_sources, now),
+            fb_face_expression: interaction::get_fb_face_expression(&int_ctx.face_sources, now),
+            htc_eye_expression: None,
+            htc_lip_expression: None,
         };
 
         if let Some((tracker, joint_count)) = &int_ctx.body_sources.body_tracker_fb {
@@ -641,18 +639,6 @@ fn stream_input_loop(
                 tracker,
                 *joint_count,
             ));
-        }
-
-        if let Some(tracker) = &int_ctx.body_sources.body_tracker_bd {
-            device_motions.append(&mut interaction::get_bd_body_tracking_points(
-                stage_reference_space,
-                now,
-                tracker,
-            ));
-        }
-
-        if let Some(tracker) = &int_ctx.body_sources.motion_tracker_bd {
-            device_motions.append(&mut interaction::get_bd_motion_trackers(now, tracker));
         }
 
         core_ctx.send_tracking(
