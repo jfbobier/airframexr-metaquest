@@ -18,7 +18,10 @@ use alvr_common::{
 use alvr_packets::{ButtonEntry, ButtonValue, StreamConfig};
 use alvr_session::{BodyTrackingBDConfig, BodyTrackingSourcesConfig, FaceTrackingSourcesConfig};
 use openxr as xr;
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use xr::SpaceLocationFlags;
 
 const IPD_CHANGE_EPS: f32 = 0.001;
@@ -134,6 +137,7 @@ pub struct InteractionSourcesConfig {
     pub face_tracking: Option<FaceTrackingSourcesConfig>,
     pub body_tracking: Option<BodyTrackingSourcesConfig>,
     pub prefers_multimodal_input: bool,
+    pub hands_as_controllers: bool,
 }
 
 impl InteractionSourcesConfig {
@@ -157,6 +161,12 @@ impl InteractionSourcesConfig {
                 .controllers
                 .as_option()
                 .is_some_and(|c| c.multimodal_tracking),
+            hands_as_controllers: config
+                .settings
+                .headset
+                .controllers
+                .as_option()
+                .is_some_and(|c| c.tracked && c.hand_tracking_interaction.as_option().is_none()),
         }
     }
 }
@@ -171,6 +181,9 @@ pub struct InteractionContext {
     pub hands_interaction: [HandInteraction; 2],
     multimodal_handle: Option<MultimodalMeta>,
     pub multimodal_hands_enabled: bool,
+    hand_interaction_bound: bool,
+    // free hands drive controllers (pose, pinch = trigger, double pinch = A / X) instead of only sending the skeleton
+    pub hands_as_controllers: bool,
     pub face_sources: FaceSources,
     pub body_sources: BodySources,
 }
@@ -342,6 +355,52 @@ impl InteractionContext {
             )
             .unwrap();
 
+        // Hands as controllers: XR_EXT_hand_interaction gives a hand-driven user the same grip and aim poses, and
+        // a pinch value, through the same actions as the controllers. The runtime picks the active profile:
+        // the controllers' while they are held, this one with free hands.
+        let hand_interaction_bound = if xr_instance.exts().ext_hand_interaction.is_some() {
+            let mut hand_bindings = vec![];
+            for (hand, grip, aim, trigger_click_id, trigger_value_id) in [
+                (
+                    "left",
+                    &left_grip_action,
+                    &left_aim_action,
+                    *LEFT_TRIGGER_CLICK_ID,
+                    *LEFT_TRIGGER_VALUE_ID,
+                ),
+                (
+                    "right",
+                    &right_grip_action,
+                    &right_aim_action,
+                    *RIGHT_TRIGGER_CLICK_ID,
+                    *RIGHT_TRIGGER_VALUE_ID,
+                ),
+            ] {
+                hand_bindings.push(binding(grip, &format!("/user/hand/{hand}/input/grip/pose")));
+                hand_bindings.push(binding(aim, &format!("/user/hand/{hand}/input/aim/pose")));
+                let pinch = format!("/user/hand/{hand}/input/pinch_ext/value");
+                if let Some(ButtonAction::Binary(action)) = button_actions.get(&trigger_click_id) {
+                    hand_bindings.push(binding(action, &pinch));
+                }
+                if let Some(ButtonAction::Scalar(action)) = button_actions.get(&trigger_value_id) {
+                    hand_bindings.push(binding(action, &pinch));
+                }
+            }
+
+            let res = xr_instance.suggest_interaction_profile_bindings(
+                xr_instance
+                    .string_to_path("/interaction_profiles/ext/hand_interaction_ext")
+                    .unwrap(),
+                &hand_bindings,
+            );
+            if let Err(e) = &res {
+                warn!("Failed to register hand interaction input: {e:?}");
+            }
+            res.is_ok()
+        } else {
+            false
+        };
+
         // Pico headsets require calling get_system_properties to test for extensions, because all
         // extensions function pointers are available even if the feature is not supported by the
         // hardware. The full checks are done in supports_eye_gaze_interaction. This is required
@@ -453,6 +512,8 @@ impl InteractionContext {
             ],
             multimodal_handle,
             multimodal_hands_enabled: false,
+            hand_interaction_bound,
+            hands_as_controllers: false,
             face_sources: FaceSources {
                 combined_eyes_source,
                 eye_tracker_fb: None,
@@ -478,6 +539,7 @@ impl InteractionContext {
             face_tracker.stop_face_tracking().ok();
         }
         self.multimodal_hands_enabled = false;
+        self.hands_as_controllers = false;
         self.face_sources.eye_tracker_fb = None;
         self.face_sources.face_tracker_fb = None;
         self.face_sources.face_tracker_pico = None;
@@ -526,6 +588,11 @@ impl InteractionContext {
                 }
             }
         }
+
+        // The server's own gesture emulation (hand_tracking_interaction) and multimodal input already cover free
+        // hands; only emulate here when neither does.
+        self.hands_as_controllers =
+            self.hand_interaction_bound && config.hands_as_controllers && !self.multimodal_hands_enabled;
 
         self.face_sources.eye_tracker_fb = create_ext_object(
             "EyeTrackerSocial",
@@ -943,6 +1010,82 @@ pub fn update_buttons(
     }
 
     button_entries
+}
+
+// Two pinches in a row on the same hand are that hand's X (left) or A (right) button: the AirFrameXR desktop
+// mirror reads it as a double click, like a controller's real button. Same rule as the visionOS client: a pinch
+// that begins less than 0.9 s after the end of a short (under 0.6 s) one raises the button for 0.15 s.
+const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(900);
+const DOUBLE_TAP_MAX_PINCH: Duration = Duration::from_millis(600);
+const DOUBLE_TAP_PULSE: Duration = Duration::from_millis(150);
+
+#[derive(Default, Clone, Copy)]
+struct HandTap {
+    down: bool,
+    began_at: Option<Instant>,
+    ended_at: Option<Instant>,
+    pulse_until: Option<Instant>,
+    pulse_sent: bool,
+}
+
+#[derive(Default)]
+pub struct HandTaps([HandTap; 2]);
+
+impl HandTaps {
+    /// `hand_driven`: the hand is tracked without a controller (the pinch is read from the trigger
+    /// click, which the hand interaction profile drives); with controllers nothing is emulated.
+    pub fn update(
+        &mut self,
+        xr_session: &xr::Session<xr::Vulkan>,
+        button_actions: &HashMap<u64, ButtonAction>,
+        hand_driven: [bool; 2],
+        now: Instant,
+    ) -> Vec<ButtonEntry> {
+        let mut entries = vec![];
+
+        for (h, tap) in self.0.iter_mut().enumerate() {
+            let (trigger_click_id, button_id) = if h == 0 {
+                (*LEFT_TRIGGER_CLICK_ID, *LEFT_X_CLICK_ID)
+            } else {
+                (*RIGHT_TRIGGER_CLICK_ID, *RIGHT_A_CLICK_ID)
+            };
+
+            let down = hand_driven[h]
+                && matches!(
+                    button_actions.get(&trigger_click_id),
+                    Some(ButtonAction::Binary(action))
+                        if action
+                            .state(xr_session, xr::Path::NULL)
+                            .is_ok_and(|s| s.is_active && s.current_state)
+                );
+
+            if down && !tap.down {
+                if let (Some(began), Some(ended)) = (tap.began_at, tap.ended_at) {
+                    if ended > began
+                        && now.duration_since(ended) < DOUBLE_TAP_WINDOW
+                        && ended.duration_since(began) < DOUBLE_TAP_MAX_PINCH
+                    {
+                        tap.pulse_until = Some(now + DOUBLE_TAP_PULSE);
+                    }
+                }
+                tap.began_at = Some(now);
+            } else if !down && tap.down {
+                tap.ended_at = Some(now);
+            }
+            tap.down = down;
+
+            let pulse = tap.pulse_until.is_some_and(|until| now < until);
+            if pulse != tap.pulse_sent {
+                tap.pulse_sent = pulse;
+                entries.push(ButtonEntry {
+                    path_id: button_id,
+                    value: ButtonValue::Binary(pulse),
+                });
+            }
+        }
+
+        entries
+    }
 }
 
 pub fn get_eye_gazes(

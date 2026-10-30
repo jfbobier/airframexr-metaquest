@@ -536,6 +536,7 @@ fn stream_input_loop(
     let mut last_controller_poses = [Pose::default(); 2];
     let mut last_palm_poses = [Pose::default(); 2];
     let mut last_view_params = [ViewParams::default(); 2];
+    let mut hand_taps = interaction::HandTaps::default();
 
     let mut deadline = Instant::now();
     let frame_interval = Duration::from_secs_f32(1.0 / refresh_rate);
@@ -600,12 +601,20 @@ fn stream_input_loop(
 
         // Note: When multimodal input is enabled, we are sure that when free hands are used
         // (not holding controllers) the controller data is None.
-        if int_ctx.multimodal_hands_enabled || left_hand_skeleton.is_none() {
+        // Free hands drive controllers when hands_as_controllers (see InteractionContext): the pose the hand
+        // interaction profile gives for the grip is sent next to the skeleton, like the visionOS client does.
+        let hands_as_controllers = int_ctx.hands_as_controllers;
+        let hand_driven = [
+            hands_as_controllers && left_hand_skeleton.is_some(),
+            hands_as_controllers && right_hand_skeleton.is_some(),
+        ];
+
+        if int_ctx.multimodal_hands_enabled || hand_driven[0] || left_hand_skeleton.is_none() {
             if let Some(motion) = left_hand_motion {
                 device_motions.push((*HAND_LEFT_ID, motion));
             }
         }
-        if int_ctx.multimodal_hands_enabled || right_hand_skeleton.is_none() {
+        if int_ctx.multimodal_hands_enabled || hand_driven[1] || right_hand_skeleton.is_none() {
             if let Some(motion) = right_hand_motion {
                 device_motions.push((*HAND_RIGHT_ID, motion));
             }
@@ -653,7 +662,13 @@ fn stream_input_loop(
             face_data,
         );
 
-        let button_entries = interaction::update_buttons(&xr_session, &int_ctx.button_actions);
+        let mut button_entries = interaction::update_buttons(&xr_session, &int_ctx.button_actions);
+        button_entries.extend(hand_taps.update(
+            &xr_session,
+            &int_ctx.button_actions,
+            hand_driven,
+            Instant::now(),
+        ));
         if !button_entries.is_empty() {
             core_ctx.send_buttons(button_entries);
         }

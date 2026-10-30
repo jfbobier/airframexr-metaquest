@@ -164,6 +164,7 @@ pub fn entry_point() {
     let mut exts = xr::ExtensionSet::default();
     exts.bd_controller_interaction = available_extensions.bd_controller_interaction;
     exts.ext_eye_gaze_interaction = available_extensions.ext_eye_gaze_interaction;
+    exts.ext_hand_interaction = available_extensions.ext_hand_interaction;
     exts.ext_hand_tracking = available_extensions.ext_hand_tracking;
     exts.ext_local_floor = available_extensions.ext_local_floor;
     exts.fb_body_tracking = available_extensions.fb_body_tracking;
@@ -320,6 +321,7 @@ pub fn entry_point() {
             face_tracking: None,
             body_tracking: Some(lobby_body_tracking_config),
             prefers_multimodal_input: true,
+            hands_as_controllers: false, // the lobby panel points with its own hand logic
         };
         interaction_context
             .write()
