@@ -265,7 +265,6 @@ dependencies = [
 name = "alvr_common"
 version = "20.14.1"
 dependencies = [
- "android_log-sys",
  "anyhow",
  "backtrace",
  "glam",
