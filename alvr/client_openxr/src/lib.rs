@@ -138,20 +138,7 @@ pub fn entry_point() {
 
     let platform = alvr_system_info::platform();
 
-    let loader_suffix = match platform {
-        Platform::Quest1 => "_quest1",
-        Platform::PicoNeo3
-        | Platform::PicoG3
-        | Platform::Pico4
-        | Platform::Pico4Pro
-        | Platform::Pico4Enterprise => "_pico_old",
-        p if p.is_yvr() => "_yvr",
-        Platform::Lynx => "_lynx",
-        _ => "",
-    };
-    let xr_entry = unsafe {
-        xr::Entry::load_from(Path::new(&format!("libopenxr_loader{loader_suffix}.so"))).unwrap()
-    };
+    let xr_entry = unsafe { xr::Entry::load_from(Path::new("libopenxr_loader.so")).unwrap() };
 
     #[cfg(target_os = "android")]
     xr_entry.initialize_android_loader().unwrap();

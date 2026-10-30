@@ -9,7 +9,6 @@ mod version;
 use crate::build::Profile;
 use afs::Layout;
 use alvr_filesystem as afs;
-use dependencies::OpenXRLoadersSelection;
 use packaging::ReleaseFlavor;
 use pico_args::Arguments;
 use std::{fs, process, time::Instant};
@@ -210,22 +209,14 @@ fn main() {
                 "prepare-deps" => {
                     if let Some(platform) = platform {
                         if matches!(platform, BuildPlatform::Android) {
-                            dependencies::build_android_deps(
-                                for_ci,
-                                all_targets,
-                                OpenXRLoadersSelection::All,
-                            );
+                            dependencies::build_android_deps(for_ci, all_targets);
                         } else {
                             dependencies::prepare_server_deps(Some(platform), for_ci, !no_nvidia);
                         }
                     } else {
                         dependencies::prepare_server_deps(platform, for_ci, !no_nvidia);
 
-                        dependencies::build_android_deps(
-                            for_ci,
-                            all_targets,
-                            OpenXRLoadersSelection::All,
-                        );
+                        dependencies::build_android_deps(for_ci, all_targets);
                     }
                 }
                 "build-streamer" => {

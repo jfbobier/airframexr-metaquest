@@ -1,8 +1,6 @@
 use crate::{
     build::{self, Profile},
-    command,
-    dependencies::{self, OpenXRLoadersSelection},
-    BuildPlatform,
+    command, dependencies, BuildPlatform,
 };
 use alvr_filesystem as afs;
 use std::{fs, path::Path};
@@ -102,13 +100,7 @@ pub fn replace_client_openxr_manifest(from_pattern: &str, to: &str) {
 pub fn package_client_openxr(flavor: ReleaseFlavor, skip_admin_priv: bool) {
     fs::remove_dir_all(afs::deps_dir().join("android_openxr")).ok();
 
-    let openxr_selection = match flavor {
-        ReleaseFlavor::GitHub => OpenXRLoadersSelection::All,
-        ReleaseFlavor::MetaStore => OpenXRLoadersSelection::OnlyGeneric,
-        ReleaseFlavor::PicoStore => OpenXRLoadersSelection::OnlyPico,
-    };
-
-    dependencies::build_android_deps(skip_admin_priv, false, openxr_selection);
+    dependencies::build_android_deps(skip_admin_priv, false);
 
     if !matches!(flavor, ReleaseFlavor::GitHub) {
         replace_client_openxr_manifest(

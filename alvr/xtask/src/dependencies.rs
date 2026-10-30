@@ -3,12 +3,6 @@ use alvr_filesystem as afs;
 use std::{fs, path::Path};
 use xshell::{cmd, Shell};
 
-pub enum OpenXRLoadersSelection {
-    OnlyGeneric,
-    OnlyPico,
-    All,
-}
-
 pub fn choco_install(sh: &Shell, packages: &[&str]) -> Result<(), xshell::Error> {
     cmd!(
         sh,
@@ -300,71 +294,35 @@ pub fn prepare_server_deps(
     }
 }
 
-fn get_android_openxr_loaders(selection: OpenXRLoadersSelection) {
-    fn get_openxr_loader(name: &str, url: &str, source_dir: &str) {
-        let sh = Shell::new().unwrap();
-        let temp_dir = afs::build_dir().join("temp_download");
-        sh.remove_path(&temp_dir).ok();
-        sh.create_dir(&temp_dir).unwrap();
-        let destination_dir = afs::deps_dir().join("android_openxr/arm64-v8a");
-        fs::create_dir_all(&destination_dir).unwrap();
+// The Quest 2, Quest Pro and Quest 3 all use the generic Khronos loader; the vendor loaders of other headsets
+// (Pico, YVR, Lynx, Quest 1) are not fetched or packaged.
+fn get_android_openxr_loader() {
+    let sh = Shell::new().unwrap();
+    let temp_dir = afs::build_dir().join("temp_download");
+    sh.remove_path(&temp_dir).ok();
+    sh.create_dir(&temp_dir).unwrap();
+    let destination_dir = afs::deps_dir().join("android_openxr/arm64-v8a");
+    fs::create_dir_all(&destination_dir).unwrap();
 
-        command::download_and_extract_zip(url, &temp_dir).unwrap();
-        fs::copy(
-            temp_dir.join(source_dir).join("libopenxr_loader.so"),
-            destination_dir.join(format!("libopenxr_loader{name}.so")),
-        )
-        .unwrap();
-        fs::remove_dir_all(&temp_dir).ok();
-    }
-
-    get_openxr_loader(
-        "",
+    command::download_and_extract_zip(
         &format!(
             "https://github.com/KhronosGroup/OpenXR-SDK-Source/releases/download/{}",
             "release-1.0.34/openxr_loader_for_android-1.0.34.aar",
         ),
-        "prefab/modules/openxr_loader/libs/android.arm64-v8a",
-    );
-
-    if matches!(selection, OpenXRLoadersSelection::OnlyGeneric) {
-        return;
-    }
-
-    get_openxr_loader(
-        "_pico_old",
-        "https://sdk.picovr.com/developer-platform/sdk/PICO_OpenXR_SDK_220.zip",
-        "libs/android.arm64-v8a",
-    );
-
-    if matches!(selection, OpenXRLoadersSelection::OnlyPico) {
-        return;
-    }
-
-    get_openxr_loader(
-        "_quest1",
-        "https://securecdn.oculus.com/binaries/download/?id=7577210995650755", // Version 64
-        "OpenXR/Libs/Android/arm64-v8a/Release",
-    );
-
-    get_openxr_loader(
-        "_yvr",
-        "https://developer.yvrdream.com/yvrdoc/sdk/openxr/yvr_openxr_mobile_sdk_2.0.0.zip",
-        "yvr_openxr_mobile_sdk_2.0.0/OpenXR/Libs/Android/arm64-v8a",
-    );
-
-    get_openxr_loader(
-        "_lynx",
-        "https://portal.lynx-r.com/downloads/download/16", // version 1.0.0
-        "jni/arm64-v8a",
-    );
+        &temp_dir,
+    )
+    .unwrap();
+    fs::copy(
+        temp_dir
+            .join("prefab/modules/openxr_loader/libs/android.arm64-v8a")
+            .join("libopenxr_loader.so"),
+        destination_dir.join("libopenxr_loader.so"),
+    )
+    .unwrap();
+    fs::remove_dir_all(&temp_dir).ok();
 }
 
-pub fn build_android_deps(
-    skip_admin_priv: bool,
-    all_targets: bool,
-    openxr_loaders_selection: OpenXRLoadersSelection,
-) {
+pub fn build_android_deps(skip_admin_priv: bool, all_targets: bool) {
     let sh = Shell::new().unwrap();
 
     if cfg!(windows) && !skip_admin_priv {
@@ -393,5 +351,5 @@ pub fn build_android_deps(
     .run()
     .unwrap();
 
-    get_android_openxr_loaders(openxr_loaders_selection);
+    get_android_openxr_loader();
 }
