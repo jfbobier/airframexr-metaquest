@@ -8,7 +8,7 @@ use alvr_client_core::{
 };
 use alvr_common::{
     anyhow::Result,
-    error,
+    diag, error,
     glam::{UVec2, Vec2},
     info,
     parking_lot::RwLock,
@@ -54,6 +54,52 @@ pub struct ParsedStreamConfig {
 
 impl ParsedStreamConfig {
     pub fn new(config: &StreamConfig) -> Self {
+        let negotiated = &config.negotiated_config;
+        let video = &config.settings.video;
+        alvr_common::diag!(
+            "[stream-config] preferred codec {:?}, 10-bit (setting) {}, negotiated: view {}x{} refresh {} Hz, full range {}, \
+             hdr {}, encoding gamma {}, foveated encoding {}, wired {}; client: avoid_video_glitching {}, \
+             enforce_server_frame_pacing {}, max_buffering_frames {}, buffering_history_weight {}, force software decoder {}, \
+             clientside foveation {}, clientside post processing {:?}, upscaling {}",
+            video.preferred_codec,
+            video.encoder_config.use_10bit,
+            negotiated.view_resolution.x,
+            negotiated.view_resolution.y,
+            negotiated.refresh_rate_hint,
+            negotiated.use_full_range,
+            negotiated.enable_hdr,
+            negotiated.encoding_gamma,
+            negotiated.enable_foveated_encoding,
+            negotiated.wired,
+            config.settings.connection.avoid_video_glitching,
+            video.enforce_server_frame_pacing,
+            video.max_buffering_frames,
+            video.buffering_history_weight,
+            video.force_software_decoder,
+            match video.clientside_foveation.as_option() {
+                None => "off".to_owned(),
+                Some(c) => match c.mode {
+                    ClientsideFoveationMode::Static { level } => {
+                        format!("static level {}, vertical offset {}", level as i32, c.vertical_offset_deg)
+                    }
+                    ClientsideFoveationMode::Dynamic { max_level } => {
+                        format!("dynamic max level {}, vertical offset {}", max_level as i32, c.vertical_offset_deg)
+                    }
+                },
+            },
+            video.clientside_post_processing.as_option(),
+            video.upscaling.as_option().is_some(),
+        );
+        alvr_common::diag!(
+            "[passthrough] stream start: {} | mediacodec options sent by the streamer: {:?}",
+            alvr_graphics::passthrough_diag_string(video.passthrough.as_option()),
+            video
+                .mediacodec_extra_options
+                .iter()
+                .map(|(k, v)| format!("{k}={}", v.value))
+                .collect::<Vec<_>>()
+        );
+
         Self {
             view_resolution: config.negotiated_config.view_resolution,
             refresh_rate_hint: config.negotiated_config.refresh_rate_hint,
@@ -88,6 +134,167 @@ impl ParsedStreamConfig {
     }
 }
 
+/// Counters behind the once-per-second `[diag]` line (see DIAG.md). Plain arithmetic per frame; the
+/// only formatting and allocation happens once a second, in `emit`.
+struct DiagWindow {
+    started: Instant,
+    last_render_end: Option<Instant>,
+    last_timestamp: Option<Duration>,
+    frames: u32,
+    new_buffers: u32,
+    repeats: u32,
+    stalled_timestamps: u32,
+    backward_timestamps: u32,
+    intervals: u32,
+    interval_sum: Duration,
+    interval_min: Duration,
+    interval_max: Duration,
+    intervals_over: u32,
+    render_sum: Duration,
+    render_max: Duration,
+    poll_sum: Duration,
+    poll_max: Duration,
+    draw_sum: Duration,
+    draw_max: Duration,
+}
+
+impl DiagWindow {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            last_render_end: None,
+            last_timestamp: None,
+            frames: 0,
+            new_buffers: 0,
+            repeats: 0,
+            stalled_timestamps: 0,
+            backward_timestamps: 0,
+            intervals: 0,
+            interval_sum: Duration::ZERO,
+            interval_min: Duration::MAX,
+            interval_max: Duration::ZERO,
+            intervals_over: 0,
+            render_sum: Duration::ZERO,
+            render_max: Duration::ZERO,
+            poll_sum: Duration::ZERO,
+            poll_max: Duration::ZERO,
+            draw_sum: Duration::ZERO,
+            draw_max: Duration::ZERO,
+        }
+    }
+
+    fn reset(&mut self, now: Instant) {
+        let last_render_end = self.last_render_end;
+        let last_timestamp = self.last_timestamp;
+        *self = Self::new();
+        self.started = now;
+        self.last_render_end = last_render_end;
+        self.last_timestamp = last_timestamp;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn frame(
+        &mut self,
+        frame_interval: Duration,
+        new_buffer: Option<Duration>,
+        poll: Duration,
+        draw: Duration,
+        render_start: Instant,
+        render_end: Instant,
+    ) {
+        self.frames += 1;
+        if let Some(timestamp) = new_buffer {
+            self.new_buffers += 1;
+            if let Some(last) = self.last_timestamp {
+                if timestamp == last {
+                    self.stalled_timestamps += 1;
+                } else if timestamp < last {
+                    self.backward_timestamps += 1;
+                }
+            }
+            self.last_timestamp = Some(timestamp);
+        } else {
+            self.repeats += 1;
+        }
+
+        if let Some(last) = self.last_render_end {
+            let interval = render_end.saturating_duration_since(last);
+            self.intervals += 1;
+            self.interval_sum += interval;
+            self.interval_min = self.interval_min.min(interval);
+            self.interval_max = self.interval_max.max(interval);
+            if interval.as_secs_f32() > 1.5 * frame_interval.as_secs_f32() {
+                self.intervals_over += 1;
+            }
+        }
+        self.last_render_end = Some(render_end);
+
+        let render = render_end.saturating_duration_since(render_start);
+        self.render_sum += render;
+        self.render_max = self.render_max.max(render);
+        self.poll_sum += poll;
+        self.poll_max = self.poll_max.max(poll);
+        self.draw_sum += draw;
+        self.draw_max = self.draw_max.max(draw);
+
+        if render_end.saturating_duration_since(self.started) >= Duration::from_secs(1) {
+            self.emit(render_end);
+        }
+    }
+
+    fn emit(&mut self, now: Instant) {
+        use alvr_common::diag::{
+            DECODE, DECODER_QUEUE, DROP_SATURATION, DROP_WAIT_IDR, IDR_REQUESTS, PACKET_LOSS,
+            PIPELINE, RENDERING, RX_GAP, RX_GAP_OVER, STAGING_FAILURES, STAGING_IMPORTS,
+            VIDEO_PACKETS, VSYNC_QUEUE,
+        };
+
+        let ms = |d: Duration| d.as_secs_f32() * 1000.0;
+        let avg = |sum: Duration, n: u32| if n > 0 { ms(sum) / n as f32 } else { 0.0 };
+        let window = now.saturating_duration_since(self.started).as_secs_f32();
+
+        let rx_gap = RX_GAP.take();
+        let decode = DECODE.take();
+        let queue = DECODER_QUEUE.take();
+        let rendering = RENDERING.take();
+        let pipeline = PIPELINE.take();
+        let vsync = VSYNC_QUEUE.take();
+
+        diag!(
+            "[diag] {window:.1}s | frames {} new {} repeat {} ts_stalled {} ts_backward {} | submit interval ms min/avg/max \
+             {:.1}/{:.1}/{:.1} over1.5x {} | render() ms avg/max {:.1}/{:.1} decoder-wait {:.1}/{:.1} draw {:.1}/{:.1} | \
+             rx pkts {} gap ms avg/max {rx_gap} over1.5x {} loss {} drop_saturation {} drop_wait_idr {} idr_req {} | \
+             decode ms avg/max {decode} decoder-queue {queue} compositor {rendering} pipeline {pipeline} vsync-queue {vsync} | \
+             staging ok {} fail {}",
+            self.frames,
+            self.new_buffers,
+            self.repeats,
+            self.stalled_timestamps,
+            self.backward_timestamps,
+            if self.intervals > 0 { ms(self.interval_min) } else { 0.0 },
+            avg(self.interval_sum, self.intervals),
+            ms(self.interval_max),
+            self.intervals_over,
+            avg(self.render_sum, self.frames),
+            ms(self.render_max),
+            avg(self.poll_sum, self.frames),
+            ms(self.poll_max),
+            avg(self.draw_sum, self.frames),
+            ms(self.draw_max),
+            VIDEO_PACKETS.take(),
+            RX_GAP_OVER.take(),
+            PACKET_LOSS.take(),
+            DROP_SATURATION.take(),
+            DROP_WAIT_IDR.take(),
+            IDR_REQUESTS.take(),
+            STAGING_IMPORTS.take(),
+            STAGING_FAILURES.take(),
+        );
+
+        self.reset(now);
+    }
+}
+
 pub struct StreamContext {
     core_context: Arc<ClientCoreContext>,
     xr_session: xr::Session<xr::Vulkan>,
@@ -106,6 +313,7 @@ pub struct StreamContext {
     renderer: StreamRenderer,
     decoder: Option<(VideoDecoderConfig, VideoDecoderSource)>,
     use_custom_reprojection: bool,
+    diag: DiagWindow,
 }
 
 impl StreamContext {
@@ -164,6 +372,18 @@ impl StreamContext {
         let target_view_resolution =
             compute_target_view_resolution(config.view_resolution, &config.upscaling);
         let format = graphics::swapchain_format(&gfx_ctx, &xr_session, config.enable_hdr);
+
+        diag!("[vulkan] {}", gfx_ctx.device_summary());
+        diag!(
+            "[swapchain] chosen format {format} (VK_FORMAT, 43 = R8G8B8A8_SRGB, 37 = R8G8B8A8_UNORM, 97 = R16G16B16A16_SFLOAT), \
+             size {}x{} per eye, usage COLOR_ATTACHMENT|SAMPLED, hdr {}, runtime offered {:?}; \
+             clientside foveation profile {}",
+            target_view_resolution.x,
+            target_view_resolution.y,
+            config.enable_hdr,
+            xr_session.enumerate_swapchain_formats().ok(),
+            if foveation_profile.is_some() { "created (not applied to the swapchain: unused in the Vulkan binding, as in GLES)" } else { "none" }
+        );
 
         let swapchains = [
             graphics::create_swapchain(
@@ -248,6 +468,7 @@ impl StreamContext {
             renderer,
             decoder: None,
             use_custom_reprojection: platform.is_yvr(),
+            diag: DiagWindow::new(),
         };
 
         this.update_reference_space();
@@ -308,6 +529,12 @@ impl StreamContext {
     }
 
     pub fn maybe_initialize_decoder(&mut self, codec: CodecType, config_nal: Vec<u8>) {
+        diag!(
+            "[decoder] config NAL {} bytes, codec {codec:?}; first bytes {:02x?}",
+            config_nal.len(),
+            &config_nal[..config_nal.len().min(48)]
+        );
+
         let new_config = VideoDecoderConfig {
             codec,
             force_software_decoder: self.config.force_software_decoder,
@@ -349,18 +576,22 @@ impl StreamContext {
         frame_interval: Duration,
         vsync_time: Duration,
     ) -> (ProjectionLayerBuilder, Duration) {
+        let render_start = Instant::now();
         let xr_vsync_time = xr::Time::from_nanos(vsync_time.as_nanos() as _);
         let frame_poll_deadline = Instant::now()
             + Duration::from_secs_f32(
                 frame_interval.as_secs_f32() * DECODER_MAX_TIMEOUT_MULTIPLIER,
             );
         let mut frame_result = None;
+        let poll_start = Instant::now();
         if let Some((_, source)) = &mut self.decoder {
             while frame_result.is_none() && Instant::now() < frame_poll_deadline {
                 frame_result = source.get_frame();
                 thread::sleep(Duration::from_micros(500));
             }
         }
+        let poll_time = poll_start.elapsed();
+        let new_buffer_timestamp = frame_result.map(|(timestamp, _)| timestamp);
 
         let (timestamp, view_params, buffer_ptr) =
             if let Some((timestamp, buffer_ptr)) = frame_result {
@@ -427,6 +658,7 @@ impl StreamContext {
             openxr_display_time = vsync_time;
         }
 
+        let draw_start = Instant::now();
         unsafe {
             self.renderer.render(
                 buffer_ptr,
@@ -445,6 +677,7 @@ impl StreamContext {
                 self.config.passthrough.as_ref(),
             )
         };
+        let draw_time = draw_start.elapsed();
 
         self.swapchains[0].release_image().unwrap();
         self.swapchains[1].release_image().unwrap();
@@ -457,6 +690,15 @@ impl StreamContext {
                 );
             }
         }
+
+        self.diag.frame(
+            frame_interval,
+            new_buffer_timestamp,
+            poll_time,
+            draw_time,
+            render_start,
+            Instant::now(),
+        );
 
         let rect = xr::Rect2Di {
             offset: xr::Offset2Di { x: 0, y: 0 },
