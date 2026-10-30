@@ -1,90 +1,86 @@
-<p align="center"> <img width="500" src="resources/ALVR-Grey.svg"/> </p>
+# AirFrameXR client for Meta Quest
 
-# ALVR - Air Light VR
+> ## ALPHA TEST ONLY
+>
+> This client **builds, but has never been run on a headset.** Nothing in it has been seen working: not the
+> lobby, not a stream, not a single frame. Expect a black screen, a crash, a wrong picture or no connection. Do
+> not use it for anything you care about. If you want a Quest client that works today, use the stock
+> [ALVR client](https://github.com/alvr-org/ALVR/releases).
 
-[![badge-discord][]][link-discord] [![badge-matrix][]][link-matrix] [![badge-opencollective][]][link-opencollective]
+The Quest client of [AirFrameXR](https://github.com/jfbobier/AirFrameXR), wireless PC VR for NVIDIA cards: the PC
+runs the game through AirFrameXR's OpenXR runtime (frame generation, foveated encoding, NVENC), streams it with
+the ALVR v20 protocol, and this app shows it on the headset. It pairs with the AirFrameXR streamer; it is built
+around that one stream and is not meant for a stock ALVR server.
 
-Stream VR games from your PC to your headset via Wi-Fi.
-This is a fork of [ALVR](https://github.com/polygraphene/ALVR).
+Targets: **Quest 3** (primary), **Quest Pro** (supported), **Quest 2** (best effort, never tuned for and never allowed
+to block a change). Codec: **HEVC only**.
 
-### Direct download to the latest version:
-### [Windows Launcher](https://github.com/alvr-org/ALVR/releases/latest/download/alvr_launcher_windows.zip) | [Linux Launcher](https://github.com/alvr-org/ALVR/releases/latest/download/alvr_launcher_linux.tar.gz)
+## Credits
 
-## Compatibility
+This is a fork of [ALVR](https://github.com/alvr-org/ALVR) at tag `v20.14.1`, by polygraphene, the alvr-org
+contributors and everyone listed in `README-ALVR.md` (the unchanged upstream README). The streaming protocol, the
+client core, the OpenXR client, the decoder and the lobby are theirs. ALVR is MIT licensed and so is this fork
+(see `LICENSE`). Base `v20.14.1` rather than upstream `master`, because the AirFrameXR streamer speaks the 20.14.1
+protocol and `master` (21.0.0-dev) does not.
 
-|          VR Headset          |                                        Support                                         |
-| :--------------------------: | :------------------------------------------------------------------------------------: |
-|       Apple Vision Pro       |    :heavy_check_mark: ([store link](https://apps.apple.com/app/alvr/id6479728026))     |
-|      Quest 1/2/3/3S/Pro      | :heavy_check_mark: ([store link](https://www.meta.com/experiences/7674846229245715) *) |
-|     Pico Neo 3/4/4 Ultra     |                                   :heavy_check_mark:                                   |
-|    Play For Dream YVR 1/2/MR |                                   :heavy_check_mark:                                   |
-| Vive Focus 3/Vision/XR Elite |                                   :heavy_check_mark:                                   |
-|           Lynx R1            |                                   :heavy_check_mark:                                   |
-|     PhoneVR (smartphone)     |     :heavy_check_mark: ** ([repo](https://github.com/PhoneVR-Developers/PhoneVR))      |
-|        Android/Monado        |                                      :warning: **                                      |
-|          Oculus Go           |                 :x: ([old repo](https://github.com/polygraphene/ALVR))                 |
+## What this fork changes
 
-\* : ALVR for Quest 1 not available through the Meta store.  
-\** : Only works on some smartphones, not enough testing.  
+Branch `airframexr-quest`, on top of `v20.14.1`. Details, the GLES-to-Vulkan mapping, every deviation and the
+device checklist: [`QUEST_VULKAN_PORT.md`](QUEST_VULKAN_PORT.md).
 
-|     PC OS      |                                    Support                                    |
-| :------------: | :---------------------------------------------------------------------------: |
-| Windows 10/11  | :heavy_check_mark: ([store link](https://store.steampowered.com/app/3312710)) |
-| Windows XP/7/8 |                                      :x:                                      |
-|     Linux      |                             :heavy_check_mark:***                             |
-|     macOS      |                                      :x:                                      |
+- **Vulkan only, no GLES.** The renderer (`alvr_graphics`) and the OpenXR session use `XR_KHR_vulkan_enable2`; the
+  runtime picks the device and the Vulkan instance and device are wrapped into wgpu 24 with wgpu-hal. The GLES and EGL code and the
+  OpenGL C API are removed. The manifest requires Vulkan 1.1. The GLES code was the reference: each piece was ported function
+  by function, and anything that differs is listed in the notes.
+- **The decoder's `AHardwareBuffer` is imported as a Vulkan image** with an immutable YCbCr sampler (the staging pass), in
+  place of the EGL image and `samplerExternalOES`. The two-pass structure of the GLES client is kept.
+- **Colour comes from what the stream declares.** The AirFrameXR chain is HEVC Main10 (10-bit), BT.709, full range, SDR.
+  For that case the conversion is created as BT.709 full range and the GLES limited-range shader remap is gone. HDR or a
+  limited-range stream keep the driver's values. The log prints what the driver suggested.
 
-\*** : Linux support is still in beta. To be able to make audio work or run ALVR at all you may need advanced knowledge of your distro for debugging or building from source.
+**Not done yet** (planned, nothing built): aligning the field-of-view restriction with the streamer's per-edge
+settings, a richer Quest UI, and a fused single-pass renderer that would drop the staging pass. That last one is the
+reason for the Vulkan port, and any speed gain from it is a **hypothesis that has not been measured**: there is no baseline
+against the stock client and no profile of this one.
 
-### Requirements
+## Install (sideload)
 
--   A supported standalone VR headset (see compatibility table above)
+The APK is signed with a debug key. It uses the stock ALVR client's package name (`alvr.client.stable`), so a stock ALVR
+client already on the headset has to be uninstalled first (Android refuses a different signature).
 
--   SteamVR
+```
+adb uninstall alvr.client.stable
+adb install -r airframexr-quest-0.1.0-alpha1.apk
+```
 
--   High-end gaming PC
-    -   See OS compatibility table above.
-    -   NVIDIA GPU that supports NVENC (1000 GTX Series or higher) (or with an AMD GPU that supports AMF VCE) with the latest driver.
-    -   Laptops with an onboard (Intel HD, AMD iGPU) and an additional dedicated GPU (NVidia GTX/RTX, AMD HD/R5/R7): you should assign the dedicated GPU or "high performance graphics adapter" to the applications ALVR, SteamVR for best performance and compatibility. (NVidia: Nvidia control panel->3d settings->application settings; AMD: similiar way)
+Then start the AirFrameXR streamer on the PC and connect as with any ALVR client.
 
--   802.11ac 5Ghz wireless or ethernet wired connection
-    -   It is recommended to use 802.11ac 5Ghz for the headset and ethernet for PC
-    -   You need to connect both the PC and the headset to same router (or use a routed connection as described [here](https://github.com/alvr-org/ALVR/wiki/ALVR-v14-and-Above))
+## What to check first (on a headset, please report)
 
-## Install
+1. `adb logcat` shows the `Vulkan: instance version ...` and `Staging: decoder buffer format ... (driver suggested ...)`
+   lines and no panic or Vulkan validation error.
+2. The lobby is upright and its text readable.
+3. The stream is upright, not mirrored, and a grey ramp has correct black and white levels (no crushed blacks, no clipped
+   whites).
+4. Foveation, upscaling, passthrough blend and chroma key still work.
+5. Lobby to stream and back, and a stream restart, still work.
+6. Same on Quest 3, then Quest Pro, then Quest 2.
 
-Follow the installation guide [here](https://github.com/alvr-org/ALVR/wiki/Installation-guide).
+Open questions only a device can answer: whether each headset decodes HEVC Main10 in hardware, whether the Qualcomm
+driver accepts the forced BT.709 full-range conversion, and the AHardwareBuffer import path.
 
-## Troubleshooting
+## Build
 
--   Please check the [Troubleshooting](https://github.com/alvr-org/ALVR/wiki/Troubleshooting) page, and also [Linux Troubleshooting](https://github.com/alvr-org/ALVR/wiki/Linux-Troubleshooting) if applicable.
--   Configuration recommendations and information may be found [here](https://github.com/alvr-org/ALVR/wiki/Information-and-Recommendations)
+Linux or WSL; the Android SDK platform 32, build-tools 34 and NDK r26b (26.1.10909125), `cargo-apk`, `cargo-ndk`, the Rust
+`aarch64-linux-android` target and `unzip`.
 
-## Uninstall
+```
+git submodule update --init openvr
+cargo xtask prepare-deps --platform android   # the last download (Lynx loader) may fail; the Quest loaders are already fetched
+export JAVA_HOME=... ANDROID_HOME=~/Android/Sdk ANDROID_SDK_ROOT=~/Android/Sdk \
+       ANDROID_NDK_HOME=~/Android/Sdk/ndk/26.1.10909125
+cargo xtask build-client --release            # build/alvr_client_android/alvr_client_android.apk
+```
 
-Open `ALVR Dashboard.exe`, go to `Installation` tab then press `Remove firewall rules`. Close ALVR window and delete the ALVR folder.
-
-## Build from source
-
-You can follow the guide [here](https://github.com/alvr-org/ALVR/wiki/Building-From-Source).
-
-## License
-
-ALVR is licensed under the [MIT License](LICENSE).
-
-## Privacy policy
-
-ALVR apps do not directly collect any kind of data.
-
-## Donate
-
-If you want to support this project you can make a donation to our [Open Source Collective account](https://opencollective.com/alvr).
-
-You can also donate to the original author of ALVR using Paypal (polygraphene@gmail.com) or with bitcoin (1FCbmFVSjsmpnAj6oLx2EhnzQzzhyxTLEv).
-
-[badge-discord]: https://img.shields.io/discord/720612397580025886?style=for-the-badge&logo=discord&color=5865F2 "Join us on Discord"
-[link-discord]: https://discord.gg/ALVR
-[badge-matrix]: https://img.shields.io/static/v1?label=chat&message=%23alvr&style=for-the-badge&logo=matrix&color=blueviolet "Join us on Matrix"
-[link-matrix]: https://matrix.to/#/#alvr:ckie.dev?via=ckie.dev
-[badge-opencollective]: https://img.shields.io/opencollective/all/alvr?style=for-the-badge&logo=opencollective&color=79a3e6 "Donate"
-[link-opencollective]: https://opencollective.com/alvr
+The SPIR-V of the staging shaders is committed; `alvr/graphics/resources/compile_staging_shaders.sh` regenerates it
+with the NDK's `glslc`.
