@@ -105,6 +105,9 @@ impl StreamRenderer {
             ("ENCODING_GAMMA".into(), encoding_gamma.into()),
         ]);
 
+        let foveated_encoding_on = foveated_encoding.is_some();
+        let upscaling_on = upscaling.is_some();
+
         let staging_resolution = if let Some(foveated_encoding) = foveated_encoding {
             let (staging_resolution, ffe_constants) =
                 foveated_encoding_shader_constants(base_view_resolution, foveated_encoding);
@@ -132,6 +135,16 @@ impl StreamRenderer {
                 ),
             ]);
         };
+
+        // always-visible diagnostics (see DIAG.md)
+        alvr_common::diag!(
+            "[stream-renderer] swapchain format {target_format:?}, base view {base_view_resolution}, target view \
+             {target_view_resolution}, staging {staging_resolution}, srgb_correction {enable_srgb_correction}, \
+             forced BT.709 full range {declared_full_range_bt709}, encoding gamma {encoding_gamma}, \
+             foveated encoding {foveated_encoding_on}, upscaling {upscaling_on}, push constants {PUSH_CONSTANTS_SIZE} bytes, \
+             shader constants {:?}",
+            constants.iter().collect::<std::collections::BTreeMap<_, _>>()
+        );
 
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
             label: None,
@@ -331,9 +344,93 @@ impl StreamRenderer {
     }
 }
 
-fn set_passthrough_push_constants(render_pass: &mut RenderPass, config: Option<&PassthroughMode>) {
+/// What the shader receives for a passthrough configuration. The channels are only written for
+/// the chroma key modes (the Blend path leaves them untouched, like before).
+struct PassthroughConstants {
+    mode: u32,
+    alpha: f32,
+    channels: Option<[Vec4; 3]>,
+}
+
+fn passthrough_constants(config: Option<&PassthroughMode>) -> PassthroughConstants {
     const DEG_TO_NORM: f32 = 1. / 360.;
 
+    match config {
+        None => PassthroughConstants {
+            mode: 0,
+            alpha: 1.,
+            channels: None,
+        },
+        Some(PassthroughMode::Blend { threshold, .. }) => PassthroughConstants {
+            mode: 0,
+            alpha: 1. - threshold,
+            channels: None,
+        },
+        Some(PassthroughMode::RgbChromaKey(config)) => {
+            let norm = |v| v as f32 / 255.;
+
+            let red = norm(config.red);
+            let green = norm(config.green);
+            let blue = norm(config.blue);
+
+            let thresh = norm(config.distance_threshold);
+
+            let up_feather = 1. + config.feathering;
+            let down_feather = 1. - config.feathering;
+
+            let range_vec =
+                thresh * Vec4::new(-up_feather, -down_feather, down_feather, up_feather);
+
+            PassthroughConstants {
+                mode: 1,
+                alpha: 1.,
+                channels: Some([red + range_vec, green + range_vec, blue + range_vec]),
+            }
+        }
+        Some(PassthroughMode::HsvChromaKey(config)) => PassthroughConstants {
+            mode: 2,
+            alpha: 1.,
+            channels: Some([
+                Vec4::new(
+                    config.hue_start_max_deg,
+                    config.hue_start_min_deg,
+                    config.hue_end_min_deg,
+                    config.hue_end_max_deg,
+                ) * DEG_TO_NORM,
+                Vec4::new(
+                    config.saturation_start_max,
+                    config.saturation_start_min,
+                    config.saturation_end_min,
+                    config.saturation_end_max,
+                ),
+                Vec4::new(
+                    config.value_start_max,
+                    config.value_start_min,
+                    config.value_end_min,
+                    config.value_end_max,
+                ),
+            ]),
+        },
+    }
+}
+
+/// The exact values the shader gets for a passthrough configuration (diagnostics).
+pub fn passthrough_diag_string(config: Option<&PassthroughMode>) -> String {
+    let constants = passthrough_constants(config);
+    let mut text = format!(
+        "passthrough_mode={} (0 blend, 1 RGB key, 2 HSV key; the shader switches to HSV on the value 3) blend_alpha={}",
+        constants.mode, constants.alpha
+    );
+    if let Some([c0, c1, c2]) = constants.channels {
+        text += &format!(
+            " ck_channel0={c0:?} ck_channel1={c1:?} ck_channel2={c2:?} \
+             [per channel: start_max, start_min, end_min, end_max]"
+        );
+    }
+    text
+}
+
+fn set_passthrough_push_constants(render_pass: &mut RenderPass, config: Option<&PassthroughMode>) {
     fn set_u32(render_pass: &mut RenderPass, offset: u32, value: u32) {
         render_pass.set_push_constants(ShaderStages::VERTEX_FRAGMENT, offset, &value.to_le_bytes());
     }
@@ -365,72 +462,17 @@ fn set_passthrough_push_constants(render_pass: &mut RenderPass, config: Option<&
         );
     }
 
-    match config {
-        None => {
-            set_u32(render_pass, PASSTHROUGH_MODE_OFFSET, 0);
-            set_float(render_pass, ALPHA_CONST_OFFSET, 1.);
-        }
-        Some(PassthroughMode::Blend { threshold, .. }) => {
-            set_u32(render_pass, PASSTHROUGH_MODE_OFFSET, 0);
-            set_float(render_pass, ALPHA_CONST_OFFSET, 1. - threshold);
-        }
-        Some(PassthroughMode::RgbChromaKey(config)) => {
-            set_u32(render_pass, PASSTHROUGH_MODE_OFFSET, 1);
+    let constants = passthrough_constants(config);
 
-            let norm = |v| v as f32 / 255.;
-
-            let red = norm(config.red);
-            let green = norm(config.green);
-            let blue = norm(config.blue);
-
-            let thresh = norm(config.distance_threshold);
-
-            let up_feather = 1. + config.feathering;
-            let down_feather = 1. - config.feathering;
-
-            let range_vec =
-                thresh * Vec4::new(-up_feather, -down_feather, down_feather, up_feather);
-
-            set_vec4(render_pass, CK_CHANNEL0_CONST_OFFSET, red + range_vec);
-            set_vec4(render_pass, CK_CHANNEL1_CONST_OFFSET, green + range_vec);
-            set_vec4(render_pass, CK_CHANNEL2_CONST_OFFSET, blue + range_vec);
-        }
-        Some(PassthroughMode::HsvChromaKey(config)) => {
-            set_u32(render_pass, PASSTHROUGH_MODE_OFFSET, 2);
-
-            set_vec4(
-                render_pass,
-                CK_CHANNEL0_CONST_OFFSET,
-                Vec4::new(
-                    config.hue_start_max_deg,
-                    config.hue_start_min_deg,
-                    config.hue_end_min_deg,
-                    config.hue_end_max_deg,
-                ) * DEG_TO_NORM,
-            );
-
-            set_vec4(
-                render_pass,
-                CK_CHANNEL1_CONST_OFFSET,
-                Vec4::new(
-                    config.saturation_start_max,
-                    config.saturation_start_min,
-                    config.saturation_end_min,
-                    config.saturation_end_max,
-                ),
-            );
-
-            set_vec4(
-                render_pass,
-                CK_CHANNEL2_CONST_OFFSET,
-                Vec4::new(
-                    config.value_start_max,
-                    config.value_start_min,
-                    config.value_end_min,
-                    config.value_end_max,
-                ),
-            );
-        }
+    set_u32(render_pass, PASSTHROUGH_MODE_OFFSET, constants.mode);
+    // the chroma key modes never set the blend alpha (it is not read there)
+    if constants.channels.is_none() {
+        set_float(render_pass, ALPHA_CONST_OFFSET, constants.alpha);
+    }
+    if let Some([c0, c1, c2]) = constants.channels {
+        set_vec4(render_pass, CK_CHANNEL0_CONST_OFFSET, c0);
+        set_vec4(render_pass, CK_CHANNEL1_CONST_OFFSET, c1);
+        set_vec4(render_pass, CK_CHANNEL2_CONST_OFFSET, c2);
     }
 }
 

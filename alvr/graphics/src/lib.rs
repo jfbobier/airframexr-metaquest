@@ -250,6 +250,9 @@ pub struct GraphicsContext {
     _instance: Instance,
 
     vulkan_handles: VulkanSessionHandles,
+
+    // Device, driver and limits as one line, for the always-visible diagnostics (see DIAG.md)
+    device_summary: String,
 }
 
 impl GraphicsContext {
@@ -433,7 +436,61 @@ impl GraphicsContext {
         }
         .context("wgpu device from the OpenXR Vulkan device")?;
 
+        let device_summary = {
+            // VkPhysicalDeviceDriverProperties is core in 1.2 and an extension before
+            let driver_properties_available = api_version >= vk::API_VERSION_1_2
+                || available_device_extensions.iter().any(|e| {
+                    e.extension_name_as_c_str().ok() == Some(ash::khr::driver_properties::NAME)
+                });
+            let mut driver_properties = vk::PhysicalDeviceDriverProperties::default();
+            let mut properties2 = vk::PhysicalDeviceProperties2::default();
+            if driver_properties_available {
+                properties2 = properties2.push_next(&mut driver_properties);
+            }
+            unsafe { ash_instance.get_physical_device_properties2(physical_device, &mut properties2) };
+            let properties = properties2.properties;
+            let c_text = |chars: &[c_char]| {
+                unsafe { CStr::from_ptr(chars.as_ptr()) }
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            let driver = if driver_properties_available {
+                format!(
+                    "{} {} (id {:?})",
+                    c_text(&driver_properties.driver_name),
+                    c_text(&driver_properties.driver_info),
+                    driver_properties.driver_id
+                )
+            } else {
+                "driver properties not available".to_owned()
+            };
+            let extension_names = device_extensions
+                .iter()
+                .map(|e| e.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                "device '{}' type {:?} vendor 0x{:x} id 0x{:x}, API {}.{}.{}, driver version 0x{:x}, {driver}; \
+                 queue family {queue_family_index} queue {queue_index}; maxPushConstantsSize {}, maxImageDimension2D {}, \
+                 maxMemoryAllocationCount {}; {} device extensions enabled: {extension_names}",
+                c_text(&properties.device_name),
+                properties.device_type,
+                properties.vendor_id,
+                properties.device_id,
+                vk::api_version_major(properties.api_version),
+                vk::api_version_minor(properties.api_version),
+                vk::api_version_patch(properties.api_version),
+                properties.driver_version,
+                properties.limits.max_push_constants_size,
+                properties.limits.max_image_dimension2_d,
+                properties.limits.max_memory_allocation_count,
+                device_extensions.len()
+            )
+        };
+        alvr_common::diag!("[vulkan] instance API {api_version:#x}; {device_summary}");
+
         Ok(Self {
+            device_summary,
             device,
             queue,
             adapter,
@@ -446,6 +503,11 @@ impl GraphicsContext {
                 queue_index,
             },
         })
+    }
+
+    /// Device, driver and limits in one line (diagnostics)
+    pub fn device_summary(&self) -> &str {
+        &self.device_summary
     }
 
     pub fn vulkan_handles(&self) -> VulkanSessionHandles {
