@@ -87,3 +87,17 @@ Not verified: Main10 HEVC hardware decode on each of Quest 3, Pro and Quest 2.
 - The log line `Staging: decoder buffer format ...` now also prints what the driver suggested. First device check: if the suggested
   range is already `ITU_FULL` and model `YCBCR_709`, the override is a no-op; otherwise compare a grey ramp.
 - Untested risk: some drivers may reject or ignore an application-chosen model/range on an external-format conversion.
+
+## Quest-only lean-up (after the port)
+
+The client now targets Meta Quest only. Removed, each in its own commit: the vendor OpenXR loaders and their download
+(`alvr/xtask`, `libopenxr_loader` is the only one packaged and loaded); HTC facial tracking and passthrough, Pico face tracking
+and configuration, BD (ByteDance) body and motion tracking (`extra_extensions/*`, `interaction.rs`, `stream.rs`, `lobby.rs`);
+the Pico / Vive / YVR / Lynx / Quest 1 branches (controller offsets and profiles, the combined eye-gaze source used only off
+Quest, velocity workarounds, YVR custom reprojection with its per-frame `locate_views`, the YVR passthrough start, the sRGB
+condition for Pico/Lynx which is simply on for Quest); two unused dependencies (`pollster`, `mdns-sd`); the Pico Store xtask
+flavour. Kept on purpose: `alvr_system_info::Platform` (shared with other crates, the client still uses it to tell Quest models
+apart), the shared `alvr_packets` / `alvr_session` types (the HTC/BD fields and settings stay in the protocol, the client sends
+`None` / disabled for them), the graphics lobby's BD skeleton drawing (dead on Quest, in `alvr_graphics`, touches the approved
+panel code path), `Cargo.toml`'s `supportedDevices=all` metadata, and the AV1 capability flag for Quest 3/3S (the
+streamer chooses HEVC). Unverified: everything above only builds; nothing was run on a headset.

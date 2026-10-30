@@ -14,7 +14,8 @@ the ALVR v20 protocol, and this app shows it on the headset. It pairs with the A
 around that one stream and is not meant for a stock ALVR server.
 
 Targets: **Quest 3** (primary), **Quest Pro** (supported), **Quest 2** (best effort, never tuned for and never allowed
-to block a change). Codec: **HEVC only**.
+to block a change). Codec: **HEVC only**. **Meta Quest only:** the code for other headsets (Pico, YVR, HTC Vive, Lynx,
+ByteDance body and face tracking, Quest 1) and their OpenXR loaders were removed, so use the stock ALVR client for those.
 
 ## Credits
 
@@ -35,6 +36,11 @@ device checklist: [`QUEST_VULKAN_PORT.md`](QUEST_VULKAN_PORT.md).
   by function, and anything that differs is listed in the notes.
 - **The decoder's `AHardwareBuffer` is imported as a Vulkan image** with an immutable YCbCr sampler (the staging pass), in
   place of the EGL image and `samplerExternalOES`. The two-pass structure of the GLES client is kept.
+- **Quest only, lean.** The vendor OpenXR loaders (Pico, YVR, Quest 1, Lynx) are no longer fetched or packaged (the Quest 2, Pro
+  and 3 use the generic Khronos loader), and about 1,400 lines of per-headset code are gone (HTC and Pico face tracking,
+  HTC passthrough, BD body and motion tracking, the Pico/Vive/YVR workarounds, a per-frame view query only YVR used), plus two
+  unused dependencies. The APK went from 26.6 MB to 20.5 MB. The streaming protocol and settings types shared with the
+  streamer are untouched.
 - **App name and icon:** the launcher entry is `AirFrameXR` with the AirFrameXR mark (an adaptive icon built from `branding/` in the
   AirFrameXR repository). The package name is `airframexr.client`, so it installs next to a stock ALVR client without touching it.
 - **Hands as controllers** (like the visionOS client): with free hands the client binds `XR_EXT_hand_interaction`, sends the hand
@@ -77,12 +83,12 @@ driver accepts the forced BT.709 full-range conversion, and the AHardwareBuffer 
 
 ## Build
 
-Linux or WSL; the Android SDK platform 32, build-tools 34 and NDK r26b (26.1.10909125), `cargo-apk`, `cargo-ndk`, the Rust
+Linux or WSL; the Android SDK platform 34, build-tools 34 and NDK r26b (26.1.10909125), `cargo-apk`, `cargo-ndk`, the Rust
 `aarch64-linux-android` target and `unzip`.
 
 ```
 git submodule update --init openvr
-cargo xtask prepare-deps --platform android   # the last download (Lynx loader) may fail; the Quest loaders are already fetched
+cargo xtask prepare-deps --platform android   # fetches the generic OpenXR loader
 export JAVA_HOME=... ANDROID_HOME=~/Android/Sdk ANDROID_SDK_ROOT=~/Android/Sdk \
        ANDROID_NDK_HOME=~/Android/Sdk/ndk/26.1.10909125
 cargo xtask build-client --release            # build/alvr_client_android/alvr_client_android.apk
