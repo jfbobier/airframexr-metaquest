@@ -71,7 +71,14 @@ composition layer settings, lobby, interaction, timing order: unchanged.
 The streamer declares BT.709, full range, sRGB transfer in the VUI (`nvenc/upstream/platform/win32/VideoEncoderNVENC.cpp`,
 `use_full_range` is forced on by `tools/host/src/nvidia_profile.rs`). The host's own colour-fit measurement of NVENC's
 reconstruction against its input is BT.709 full range, gain 0.996-0.998, offset about 0 (`docs/BENCHMARK_DESIGN.md`), so the
-declaration and the conversion agree. That was measured on the bench's P010 reconstruction, not on the bytes the Quest decodes.
+declaration and the conversion agree. The bench's reconstruction is P010, i.e. the same 10-bit path the live stream uses, but it is the encoder's own reconstruction, not what
+the Quest's decoder outputs.
+
+**The AirFrameXR chain** (`tools/host/src/nvidia_profile.rs`): HEVC, `use_10bit_encoder` 1 (ABGR10 into NVENC, Main10 out), `use_full_range` 1,
+`enable_hdr` 0, so the Quest decodes 10-bit SDR BT.709 full range and the override below is the case that always applies. A 10-bit decoder
+output is a P010-style AHardwareBuffer with an external format; the conversion handles the bit depth itself. Staging and swapchain are
+still 8-bit (sRGB or RGBA8), as in GLES, so the 10-bit gain is in the codec (less banding at a given bitrate), not on the display.
+Not verified: Main10 HEVC hardware decode on each of Quest 3, Pro and Quest 2.
 
 - SDR and `use_full_range`: the YCbCr conversion is created with `YCBCR_709` + `ITU_FULL` instead of the driver's suggestion, and the
   GLES `FIX_LIMITED_RANGE` shader remap is deleted. GLES squeezed RGB into 16-235 to undo the driver's limited-range guess; that
