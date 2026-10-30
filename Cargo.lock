@@ -254,6 +254,7 @@ dependencies = [
  "alvr_session",
  "alvr_system_info",
  "android-activity",
+ "ash",
  "jni",
  "libc",
  "ndk-context",
@@ -334,12 +335,12 @@ version = "20.14.1"
 dependencies = [
  "alvr_common",
  "alvr_session",
- "glow",
+ "ash",
  "glyph_brush_layout",
- "khronos-egl",
+ "libc",
+ "ndk-sys 0.6.0+11769913",
  "pollster 0.4.0",
  "wgpu",
- "wgpu-core",
 ]
 
 [[package]]

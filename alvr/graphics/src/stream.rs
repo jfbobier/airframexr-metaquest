@@ -6,7 +6,6 @@ use alvr_common::{
 use alvr_session::{FoveatedEncodingConfig, PassthroughMode, UpscalingConfig};
 use std::{collections::HashMap, ffi::c_void, iter, mem, rc::Rc};
 use wgpu::{
-    hal::{api, gles},
     include_wgsl, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BindingResource, BindingType, Color, ColorTargetState, ColorWrites,
     FragmentState, LoadOp, PipelineCompilationOptions, PipelineLayoutDescriptor, PrimitiveState,
@@ -60,7 +59,7 @@ impl StreamRenderer {
         context: Rc<GraphicsContext>,
         base_view_resolution: UVec2,
         target_view_resolution: UVec2,
-        swapchain_textures: [Vec<u32>; 2],
+        swapchain_textures: [Vec<u64>; 2],
         target_format: u32,
         foveated_encoding: Option<FoveatedEncodingConfig>,
         enable_srgb_correction: bool,
@@ -70,7 +69,7 @@ impl StreamRenderer {
     ) -> Self {
         let device = &context.device;
 
-        let target_format = super::gl_format_to_wgpu(target_format);
+        let target_format = super::vk_format_to_wgpu(target_format);
 
         let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: None,
@@ -184,18 +183,10 @@ impl StreamRenderer {
         });
 
         let mut view_objects = vec![];
-        let mut staging_textures_gl = vec![];
+        let mut staging_textures = vec![];
         for target_swapchain in &swapchain_textures {
-            let staging_texture = super::create_texture(device, staging_resolution, target_format);
-
-            let staging_texture_gl = unsafe {
-                staging_texture.as_hal::<api::Gles, _, _>(|tex| {
-                    let gles::TextureInner::Texture { raw, .. } = tex.unwrap().inner else {
-                        panic!("invalid texture type");
-                    };
-                    raw
-                })
-            };
+            let staging_texture =
+                super::create_staging_texture(device, staging_resolution, target_format);
 
             let bind_group = device.create_bind_group(&BindGroupDescriptor {
                 label: None,
@@ -214,7 +205,7 @@ impl StreamRenderer {
                 ],
             });
 
-            let render_target = super::create_gl_swapchain(
+            let render_target = super::create_vk_swapchain(
                 device,
                 target_swapchain,
                 target_view_resolution,
@@ -225,12 +216,13 @@ impl StreamRenderer {
                 bind_group,
                 render_target,
             });
-            staging_textures_gl.push(staging_texture_gl);
+            staging_textures.push(staging_texture);
         }
 
         let staging_renderer = StagingRenderer::new(
             Rc::clone(&context),
-            staging_textures_gl.try_into().unwrap(),
+            staging_textures.try_into().unwrap(),
+            target_format,
             staging_resolution,
             fix_limited_range,
         );
@@ -251,15 +243,16 @@ impl StreamRenderer {
         view_params: [StreamViewParams; 2],
         passthrough: Option<&PassthroughMode>,
     ) {
-        // if hardware_buffer is available copy stream to staging texture
-        if !hardware_buffer.is_null() {
-            self.staging_renderer.render(hardware_buffer);
-        }
-
         let mut encoder = self
             .context
             .device
             .create_command_encoder(&Default::default());
+
+        // if hardware_buffer is available copy stream to staging texture. In GLES this was executed
+        // right away; here it is recorded first in the same command buffer, which keeps the order.
+        if !hardware_buffer.is_null() {
+            self.staging_renderer.record(&mut encoder, hardware_buffer);
+        }
 
         for (view_idx, view_params) in view_params.iter().enumerate() {
             let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -333,6 +326,8 @@ impl StreamRenderer {
         }
 
         self.context.queue.submit(iter::once(encoder.finish()));
+
+        self.staging_renderer.after_submit();
     }
 }
 

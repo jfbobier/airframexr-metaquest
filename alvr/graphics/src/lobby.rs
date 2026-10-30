@@ -235,7 +235,7 @@ impl LobbyRenderer {
     pub fn new(
         context: Rc<GraphicsContext>,
         view_resolution: UVec2,
-        swapchain_textures: [Vec<u32>; 2],
+        swapchain_textures: [Vec<u64>; 2],
         initial_hud_message: &str,
     ) -> Self {
         let device = &context.device;
@@ -307,8 +307,8 @@ impl LobbyRenderer {
         });
 
         let render_targets = [
-            super::create_gl_swapchain(device, &swapchain_textures[0], view_resolution, SDR_FORMAT),
-            super::create_gl_swapchain(device, &swapchain_textures[1], view_resolution, SDR_FORMAT),
+            super::create_vk_swapchain(device, &swapchain_textures[0], view_resolution, SDR_FORMAT),
+            super::create_vk_swapchain(device, &swapchain_textures[1], view_resolution, SDR_FORMAT),
         ];
 
         let this = Self {

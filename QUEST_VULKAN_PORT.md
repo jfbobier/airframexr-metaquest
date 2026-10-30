@@ -1,0 +1,67 @@
+# Quest client: Vulkan port (branch `airframexr-quest`, base ALVR v20.14.1)
+
+Status: **builds** (`cargo xtask build-client --release` on WSL, arm64-v8a APK, manifest declares
+Vulkan 1.1, the `.so` no longer links GLES/EGL). **Nothing has run on a headset.** Every behaviour
+below marked "unverified" is exactly that.
+
+Target: Quest 3 first, Quest Pro supported, Quest 2 best effort. HEVC only (no AV1 work).
+
+## What was ported (GLES -> Vulkan)
+
+| GLES (v20.14.1) | Vulkan |
+|---|---|
+| `GraphicsContext::new_gl()`: wgpu on GLES, EGL display/config/context shared with OpenXR | `GraphicsContext::new_vulkan(&XrVulkanBridge)`: the OpenXR runtime picks the VkPhysicalDevice and creates VkInstance/VkDevice (`XR_KHR_vulkan_enable2`), wrapped into wgpu 24 with wgpu-hal `Instance::from_raw` / `Adapter::device_from_raw` (the bevy_mod_openxr approach). Created once before the session loop, reused by every session, like the GL context. |
+| `xr::OpenGlEs`, `khr_opengl_es_enable`, `SessionCreateInfo::Android{egl..}` | `xr::Vulkan`, `khr_vulkan_enable2`, `xr::vulkan::SessionCreateInfo{instance,physical_device,device,queue family/index}` |
+| `make_current()` calls | gone (no current-context concept) |
+| swapchain formats `SRGB8_ALPHA8 / RGBA8 / RGBA16F` (GL enums) | `VkFormat` `R8G8B8A8_SRGB / R8G8B8A8_UNORM / R16G16B16A16_SFLOAT`, same priority order, same HDR rule, same RGBA8 fallback |
+| `create_gl_swapchain`: GL texture ids -> wgpu textures (`texture_from_raw`) | `create_vk_swapchain`: `VkImage`s -> wgpu textures (`hal::vulkan::Device::texture_from_raw`, no ownership) |
+| staging pass: EGLImage + `samplerExternalOES` + GL FBO per eye | `staging.rs`: AHardwareBuffer imported as a VkImage (external format), immutable YCbCr sampler, raw render pass per eye into the wgpu staging texture, **recorded inline in wgpu's command buffer** (`CommandEncoder::as_hal_mut` + `raw_handle`) so the order (staging first, then reprojection) is the GLES one and wgpu's own fence tells when the imported buffer is free |
+| `staging_vertex/fragment.glsl` (ESSL 300) | `staging_vertex.vert`, `staging_fragment.frag` (GLSL 450, same maths), committed as SPIR-V (`compile_staging_shaders.sh`, glslc from the NDK). `#ifdef FIX_LIMITED_RANGE` is a specialization constant |
+| `view_idx` uniform | push constant |
+| `eglCreateImage` / `eglDestroyImage` per frame | `vkCreateImage` + import `vkAllocateMemory` + view + descriptor set per frame, freed when wgpu reports the submission done (no caching, 1:1 with GLES) |
+| manifest `opengles_version 3.2` | `android.hardware.vulkan.version` 0x401000 (1.1) |
+| C API `alvr_*_opengl` | **removed** (took GL texture ids; no consumer in the repo) |
+
+wgpu reprojection pass, WGSL shaders, foveated decode, upscaler, passthrough, chroma key,
+composition layer settings, lobby, interaction, timing order: unchanged.
+
+## Deviations from GLES, and why
+
+1. **Projection y flip removed** (`projection_from_fov`). GLES had `-b`, `-d` to give the GL runtime a
+   bottom-left-origin image. Vulkan swapchains are top-left and wgpu's Vulkan backend maps NDC y-up
+   to it. Unverified: if the image is upside down, this is the line.
+2. **Staging texture usage** `RENDER_ATTACHMENT | TEXTURE_BINDING` (was `COPY_DST | TEXTURE_BINDING`)
+   because it is a render target of the raw pass.
+3. **Per-frame import failures** (vkCreateImage, vkAllocateMemory, ...) log an error and repeat the
+   previous frame instead of aborting (GLES `ck!` aborted only in debug builds). Setup failures panic
+   with the Vulkan result.
+4. **Vulkan 1.1 required** (YCbCr conversion, external memory are core 1.1); startup fails loudly otherwise.
+5. Debug builds enable `InstanceFlags::DEBUG|VALIDATION` and the Khronos validation layer *if present*
+   (not shipped on Quest by default). No debug-utils messenger is created.
+6. FFR through `fb_foveation` is still ignored at swapchain creation, as before (`foveation` was unused in GLES).
+
+## Not done
+
+- Fused single pass (sampling the YCbCr image directly in the reprojection pass, removing the staging
+  pass). **UNMEASURED hypothesis**, see the header of `staging.rs`. Needs a baseline first.
+- No decoder, FOV-restriction or UI changes.
+
+## Unverified / risks, most likely first
+
+1. **Colour range and matrix.** GLES let the driver convert; Vulkan uses the buffer's *suggested*
+   model/range. The existing `FIX_LIMITED_RANGE` remap is kept as is. Check black and white levels.
+2. **Upside-down or mirrored picture** (deviation 1; also the staging orientation, derived on paper).
+3. **Layout / sync with wgpu** for the staging texture (contract in the `staging.rs` header). Symptoms:
+   flicker, one black frame at stream start, validation errors.
+4. **AHardwareBuffer import** on Qualcomm: foreign-queue acquire barrier, memory type choice.
+5. Quest 2 (older driver): Vulkan 1.1 only, chroma filter feature bits.
+6. Frame resource lifetime (max 6 buffers in flight, then the CPU waits).
+
+## First things to test on a device
+
+1. `adb logcat`: "Vulkan: instance version ..." and "Staging: decoder buffer format ..." lines, no panic.
+2. Lobby renders upright, text readable.
+3. Stream: upright, not mirrored, correct colours and black level (grey ramp), no flicker.
+4. Foveated encoding on/off, upscaling on/off, passthrough blend and chroma key.
+5. Lobby <-> stream <-> lobby, headset doff/don, stream restart with a different codec (format change path).
+6. Repeat on Quest 3, Quest Pro, Quest 2. A debug build with the validation layer, if it can be side-loaded.

@@ -6,53 +6,29 @@ pub use lobby::*;
 pub use stream::*;
 
 use alvr_common::{
+    anyhow::{anyhow, bail, Context, Result},
     glam::{Mat4, UVec2, Vec4},
-    Fov,
+    info, warn, Fov,
 };
-use glow::{self as gl, HasContext};
-use khronos_egl as egl;
-use std::{ffi::c_void, num::NonZeroU32, ptr};
+use ash::vk::{self, Handle};
+use std::ffi::{c_char, CStr};
 use wgpu::{
     hal::{self, api, MemoryFlags, TextureUses},
-    Adapter, Device, Extent3d, Instance, Queue, Texture, TextureDescriptor, TextureDimension,
-    TextureFormat, TextureUsages, TextureView,
+    Adapter, Device, DeviceDescriptor, Extent3d, Features, Instance, InstanceFlags, Limits,
+    MemoryHints, Queue, Texture, TextureDescriptor, TextureDimension, TextureFormat,
+    TextureUsages, TextureView,
 };
 
 pub const SDR_FORMAT: TextureFormat = TextureFormat::Rgba8Unorm;
-pub const SDR_FORMAT_GL: u32 = gl::RGBA8;
-pub const GL_TEXTURE_EXTERNAL_OES: u32 = 0x8D65;
+
+// Swapchain formats are passed around as raw `VkFormat` values (what OpenXR enumerates). This
+// replaces the GL enums (`SRGB8_ALPHA8`, `RGBA8`, `RGBA16F`) of the GLES backend 1:1.
+pub const VK_FORMAT_R8G8B8A8_UNORM: u32 = vk::Format::R8G8B8A8_UNORM.as_raw() as u32;
+pub const VK_FORMAT_R8G8B8A8_SRGB: u32 = vk::Format::R8G8B8A8_SRGB.as_raw() as u32;
+pub const VK_FORMAT_R16G16B16A16_SFLOAT: u32 = vk::Format::R16G16B16A16_SFLOAT.as_raw() as u32;
+pub const SDR_FORMAT_VK: u32 = VK_FORMAT_R8G8B8A8_UNORM;
+
 pub const MAX_PUSH_CONSTANTS_SIZE: u32 = 128;
-
-type CreateImageFn = unsafe extern "C" fn(
-    egl::EGLDisplay,
-    egl::EGLContext,
-    egl::Enum,
-    egl::EGLClientBuffer,
-    *const egl::Int,
-) -> egl::EGLImage;
-type DestroyImageFn = unsafe extern "C" fn(egl::EGLDisplay, egl::EGLImage) -> egl::Boolean;
-type GetNativeClientBufferFn = unsafe extern "C" fn(*const c_void) -> egl::EGLClientBuffer;
-type ImageTargetTexture2DFn = unsafe extern "C" fn(egl::Enum, egl::EGLImage);
-
-pub fn check_error(gl: &gl::Context, message_context: &str) {
-    let err = unsafe { gl.get_error() };
-    if err != glow::NO_ERROR {
-        alvr_common::error!("gl error {message_context} -> {err}");
-        std::process::abort();
-    }
-}
-
-macro_rules! ck {
-    ($gl_ctx:ident.$($gl_cmd:tt)*) => {{
-        let res = $gl_ctx.$($gl_cmd)*;
-
-        #[cfg(debug_assertions)]
-        crate::check_error(&$gl_ctx, &format!("{}:{}: {}", file!(), line!(), stringify!($($gl_cmd)*)));
-
-        res
-    }};
-}
-pub(crate) use ck;
 
 fn projection_from_fov(fov: Fov) -> Mat4 {
     const NEAR: f32 = 0.1;
@@ -66,11 +42,15 @@ fn projection_from_fov(fov: Fov) -> Mat4 {
     let c = (tanr + tanl) / (tanr - tanl);
     let d = (tanu + tand) / (tanu - tand);
 
-    // note: for wgpu compatibility, the b and d components should be flipped. Maybe a bug in the
-    // viewport handling in wgpu?
+    // Deviation from the GLES backend: there the b and d components were flipped, to give the
+    // OpenGL runtime the bottom-left-origin image it expects (wgpu's GLES backend renders with a
+    // top-left origin). OpenXR Vulkan swapchains use the Vulkan convention (row 0 is the top) and
+    // wgpu's Vulkan backend already maps NDC y-up to it with a negative viewport, so the plain
+    // projection is the right one. NOT VERIFIED ON DEVICE: if the picture is upside down, this is
+    // the place.
     Mat4::from_cols(
         Vec4::new(a, 0.0, c, 0.0),
-        Vec4::new(0.0, -b, -d, 0.0),
+        Vec4::new(0.0, b, d, 0.0),
         Vec4::new(0.0, 0.0, -1.0, -NEAR),
         Vec4::new(0.0, 0.0, -1.0, 0.0),
     )
@@ -79,12 +59,12 @@ fn projection_from_fov(fov: Fov) -> Mat4 {
 
 pub fn choose_swapchain_format(supported_formats: &[u32], enable_hdr: bool) -> u32 {
     // Priority-sorted list of swapchain formats we'll accept--
-    let mut app_supported_swapchain_formats = vec![gl::SRGB8_ALPHA8, gl::RGBA8];
+    let mut app_supported_swapchain_formats = vec![VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_R8G8B8A8_UNORM];
 
     // float16 is required for HDR output. However, float16 swapchains
     // have a high perf cost, so only use these if HDR is enabled.
     if enable_hdr {
-        app_supported_swapchain_formats.insert(0, gl::RGBA16F);
+        app_supported_swapchain_formats.insert(0, VK_FORMAT_R16G16B16A16_SFLOAT);
     }
 
     for format in app_supported_swapchain_formats {
@@ -94,15 +74,15 @@ pub fn choose_swapchain_format(supported_formats: &[u32], enable_hdr: bool) -> u
     }
 
     // If we can't enumerate, default to a required format
-    gl::RGBA8
+    VK_FORMAT_R8G8B8A8_UNORM
 }
 
-pub fn gl_format_to_wgpu(format: u32) -> TextureFormat {
+pub fn vk_format_to_wgpu(format: u32) -> TextureFormat {
     match format {
-        gl::SRGB8_ALPHA8 => TextureFormat::Rgba8UnormSrgb,
-        gl::RGBA8 => TextureFormat::Rgba8Unorm,
-        gl::RGBA16F => TextureFormat::Rgba16Float,
-        _ => panic!("Unsupported GL format: {format}"),
+        VK_FORMAT_R8G8B8A8_SRGB => TextureFormat::Rgba8UnormSrgb,
+        VK_FORMAT_R8G8B8A8_UNORM => TextureFormat::Rgba8Unorm,
+        VK_FORMAT_R16G16B16A16_SFLOAT => TextureFormat::Rgba16Float,
+        _ => panic!("Unsupported Vulkan format: {format}"),
     }
 }
 
@@ -123,9 +103,29 @@ pub fn create_texture(device: &Device, resolution: UVec2, format: TextureFormat)
     })
 }
 
-fn create_texture_from_gles(
+/// The stream staging texture. In the GLES backend it was a plain wgpu texture rendered through a
+/// GL framebuffer; here it is a plain wgpu texture rendered by the raw Vulkan staging pass, so it
+/// needs the render attachment usage (the Vulkan image gets COLOR_ATTACHMENT | SAMPLED).
+pub fn create_staging_texture(device: &Device, resolution: UVec2, format: TextureFormat) -> Texture {
+    device.create_texture(&TextureDescriptor {
+        label: Some("stream staging"),
+        size: Extent3d {
+            width: resolution.x,
+            height: resolution.y,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format,
+        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
+fn create_texture_from_vulkan(
     device: &Device,
-    texture: u32,
+    image: u64,
     resolution: UVec2,
     format: TextureFormat,
 ) -> Texture {
@@ -136,25 +136,24 @@ fn create_texture_from_gles(
     };
 
     unsafe {
-        let hal_texture = device.as_hal::<api::Gles, _, _>(|device| {
-            device.unwrap().texture_from_raw(
-                NonZeroU32::new(texture).unwrap(),
-                &hal::TextureDescriptor {
-                    label: None,
-                    size,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: TextureDimension::D2,
-                    format,
-                    usage: TextureUses::COLOR_TARGET,
-                    memory_flags: MemoryFlags::empty(),
-                    view_formats: vec![],
-                },
-                Some(Box::new(|| ())),
-            )
-        });
+        let hal_texture = hal::vulkan::Device::texture_from_raw(
+            vk::Image::from_raw(image),
+            &hal::TextureDescriptor {
+                label: None,
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: TextureDimension::D2,
+                format,
+                usage: TextureUses::COLOR_TARGET,
+                memory_flags: MemoryFlags::empty(),
+                view_formats: vec![],
+            },
+            // The image belongs to the OpenXR swapchain: do not destroy it
+            Some(Box::new(|| ())),
+        );
 
-        device.create_texture_from_hal::<api::Gles>(
+        device.create_texture_from_hal::<api::Vulkan>(
             hal_texture,
             &TextureDescriptor {
                 label: None,
@@ -171,56 +170,113 @@ fn create_texture_from_gles(
 }
 
 // This is used to convert OpenXR swapchains to wgpu
-pub fn create_gl_swapchain(
+pub fn create_vk_swapchain(
     device: &Device,
-    gl_textures: &[u32],
+    vk_images: &[u64],
     resolution: UVec2,
     format: TextureFormat,
 ) -> Vec<TextureView> {
-    gl_textures
+    vk_images
         .iter()
-        .map(|gl_tex| {
-            create_texture_from_gles(device, *gl_tex, resolution, format)
+        .map(|image| {
+            create_texture_from_vulkan(device, *image, resolution, format)
                 .create_view(&Default::default())
         })
         .collect()
 }
 
+/// What OpenXR has to do on our behalf with XR_KHR_vulkan_enable2: the runtime chooses the
+/// physical device and creates the VkInstance and VkDevice (so that its compositor can share
+/// them). `alvr_graphics` does not depend on the `openxr` crate, the client implements this.
+pub struct XrVulkanBridge<'a> {
+    pub min_api_version: u32,
+    pub max_api_version: u32,
+    /// xrCreateVulkanInstanceKHR
+    pub create_instance: &'a dyn Fn(
+        vk::PFN_vkGetInstanceProcAddr,
+        &vk::InstanceCreateInfo<'_>,
+    ) -> Result<vk::Instance>,
+    /// xrGetVulkanGraphicsDevice2KHR
+    pub get_physical_device: &'a dyn Fn(vk::Instance) -> Result<vk::PhysicalDevice>,
+    /// xrCreateVulkanDeviceKHR
+    pub create_device: &'a dyn Fn(
+        vk::PFN_vkGetInstanceProcAddr,
+        vk::PhysicalDevice,
+        &vk::DeviceCreateInfo<'_>,
+    ) -> Result<vk::Device>,
+}
+
+/// Raw handles needed by XrGraphicsBindingVulkanKHR.
+#[derive(Clone, Copy)]
+pub struct VulkanSessionHandles {
+    pub instance: vk::Instance,
+    pub physical_device: vk::PhysicalDevice,
+    pub device: vk::Device,
+    pub queue_family_index: u32,
+    pub queue_index: u32,
+}
+
+#[cfg(target_os = "android")]
+fn android_sdk_version() -> u32 {
+    let mut value = [0 as c_char; 92]; // PROP_VALUE_MAX
+    let len = unsafe {
+        libc::__system_property_get(c"ro.build.version.sdk".as_ptr(), value.as_mut_ptr())
+    };
+    if len > 0 {
+        unsafe { CStr::from_ptr(value.as_ptr()) }
+            .to_str()
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    } else {
+        0
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn android_sdk_version() -> u32 {
+    0
+}
+
 pub struct GraphicsContext {
-    _instance: Instance,
-
-    #[cfg_attr(windows, expect(dead_code))]
-    adapter: Adapter,
-
+    // Drop order matters: device and queue before adapter and instance
     device: Device,
     queue: Queue,
-    pub egl_display: egl::Display,
-    pub egl_config: egl::Config,
-    pub egl_context: egl::Context,
-    pub gl_context: gl::Context,
 
-    #[cfg_attr(windows, expect(dead_code))]
-    dummy_surface: egl::Surface,
+    #[expect(dead_code)]
+    adapter: Adapter,
+    _instance: Instance,
 
-    create_image: CreateImageFn,
-    destroy_image: DestroyImageFn,
-    get_native_client_buffer: GetNativeClientBufferFn,
-    image_target_texture_2d: ImageTargetTexture2DFn,
+    vulkan_handles: VulkanSessionHandles,
 }
 
 impl GraphicsContext {
-    #[cfg(not(windows))]
-    pub fn new_gl() -> Self {
-        use std::mem;
-        use wgpu::{
-            Backends, DeviceDescriptor, Features, InstanceDescriptor, InstanceFlags, Limits,
-            MemoryHints,
-        };
+    /// Replaces `new_gl()`. Creates the Vulkan instance/device through the OpenXR runtime
+    /// (XR_KHR_vulkan_enable2) and wraps them into wgpu (wgpu-hal `from_raw`, same approach as
+    /// bevy_mod_openxr). `Instance::graphics_requirements::<Vulkan>()` must have been called.
+    pub fn new_vulkan(bridge: &XrVulkanBridge) -> Result<Self> {
+        let entry = unsafe { ash::Entry::load() }.context("Failed to load the Vulkan loader")?;
 
-        const CREATE_IMAGE_FN_STR: &str = "eglCreateImageKHR";
-        const DESTROY_IMAGE_FN_STR: &str = "eglDestroyImageKHR";
-        const GET_NATIVE_CLIENT_BUFFER_FN_STR: &str = "eglGetNativeClientBufferANDROID";
-        const IMAGE_TARGET_TEXTURE_2D_FN_STR: &str = "glEGLImageTargetTexture2DOES";
+        let instance_version = unsafe { entry.try_enumerate_instance_version() }
+            .context("vkEnumerateInstanceVersion")?
+            .unwrap_or(vk::API_VERSION_1_0);
+        let api_version = instance_version.clamp(bridge.min_api_version, bridge.max_api_version);
+        info!(
+            "Vulkan: instance version {}.{}, OpenXR range {}.{}..{}.{}, using {}.{}",
+            vk::api_version_major(instance_version),
+            vk::api_version_minor(instance_version),
+            vk::api_version_major(bridge.min_api_version),
+            vk::api_version_minor(bridge.min_api_version),
+            vk::api_version_major(bridge.max_api_version),
+            vk::api_version_minor(bridge.max_api_version),
+            vk::api_version_major(api_version),
+            vk::api_version_minor(api_version),
+        );
+        // The AHardwareBuffer import (YCbCr conversion, external memory) relies on Vulkan 1.1
+        // promoted functionality.
+        if api_version < vk::API_VERSION_1_1 {
+            bail!("Vulkan 1.1 is required, the runtime allows only up to the lower version");
+        }
 
         let flags = if cfg!(debug_assertions) {
             InstanceFlags::DEBUG | InstanceFlags::VALIDATION
@@ -228,179 +284,169 @@ impl GraphicsContext {
             InstanceFlags::empty()
         };
 
-        let instance = Instance::new(&InstanceDescriptor {
-            backends: Backends::GL,
-            flags,
-            backend_options: Default::default(),
-        });
+        let extensions = hal::vulkan::Instance::desired_extensions(&entry, api_version, flags)
+            .map_err(|e| anyhow!("Vulkan desired instance extensions: {e:?}"))?;
+        let extension_ptrs = extensions.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
 
-        let adapter = instance.enumerate_adapters(Backends::GL).remove(0);
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &DeviceDescriptor {
-                label: None,
-                required_features: Features::PUSH_CONSTANTS,
-                required_limits: Limits {
-                    max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
-                    ..adapter.limits()
+        // Validation layer only when requested and present (like wgpu's own instance creation)
+        let mut layer_ptrs = vec![];
+        if flags.contains(InstanceFlags::VALIDATION) {
+            const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
+            let available = unsafe { entry.enumerate_instance_layer_properties() }
+                .unwrap_or_default()
+                .iter()
+                .any(|l| l.layer_name_as_c_str().ok() == Some(VALIDATION_LAYER));
+            if available {
+                layer_ptrs.push(VALIDATION_LAYER.as_ptr());
+            } else {
+                warn!("Vulkan validation requested but VK_LAYER_KHRONOS_validation is not present");
+            }
+        }
+
+        let app_info = vk::ApplicationInfo::default()
+            .application_name(c"ALVR Client")
+            .application_version(0)
+            .engine_name(c"ALVR")
+            .engine_version(0)
+            .api_version(api_version);
+        let instance_info = vk::InstanceCreateInfo::default()
+            .application_info(&app_info)
+            .enabled_extension_names(&extension_ptrs)
+            .enabled_layer_names(&layer_ptrs);
+
+        let get_instance_proc_addr = entry.static_fn().get_instance_proc_addr;
+        let raw_instance = (bridge.create_instance)(get_instance_proc_addr, &instance_info)
+            .context("xrCreateVulkanInstanceKHR")?;
+        let ash_instance = unsafe { ash::Instance::load(entry.static_fn(), raw_instance) };
+
+        let physical_device = (bridge.get_physical_device)(raw_instance)
+            .context("xrGetVulkanGraphicsDevice2KHR")?;
+
+        let hal_instance = unsafe {
+            hal::vulkan::Instance::from_raw(
+                entry,
+                ash_instance.clone(),
+                api_version,
+                android_sdk_version(),
+                None, // debug utils messenger: the validation layer logs by itself
+                extensions,
+                flags,
+                false,
+                None, // wgpu-hal owns (and destroys) the instance
+            )
+        }
+        .map_err(|e| anyhow!("wgpu-hal Vulkan instance: {e:?}"))?;
+
+        let exposed_adapter = hal_instance.expose_adapter(physical_device)
+            .context("wgpu does not support the Vulkan physical device chosen by OpenXR")?;
+
+        let features = Features::PUSH_CONSTANTS;
+
+        let mut device_extensions = exposed_adapter.adapter.required_device_extensions(features);
+
+        // Needed to import the decoder's AHardwareBuffer as a sampled image. The other
+        // extensions VK_ANDROID_external_memory_android_hardware_buffer depends on are part of
+        // Vulkan 1.1 (checked above).
+        let available_device_extensions =
+            unsafe { ash_instance.enumerate_device_extension_properties(physical_device) }
+                .context("vkEnumerateDeviceExtensionProperties")?;
+        for required in [
+            ash::android::external_memory_android_hardware_buffer::NAME,
+            ash::ext::queue_family_foreign::NAME,
+        ] {
+            let available = available_device_extensions
+                .iter()
+                .any(|e| e.extension_name_as_c_str().ok() == Some(required));
+            if !available {
+                bail!("Vulkan device extension {required:?} is not supported");
+            }
+            if !device_extensions.contains(&required) {
+                device_extensions.push(required);
+            }
+        }
+
+        let queue_family_index = unsafe {
+            ash_instance.get_physical_device_queue_family_properties(physical_device)
+        }
+        .iter()
+        .position(|q| q.queue_flags.contains(vk::QueueFlags::GRAPHICS))
+        .context("No graphics queue family")? as u32;
+        let queue_index = 0;
+
+        let queue_priorities = [1.0];
+        let queue_infos = [vk::DeviceQueueCreateInfo::default()
+            .queue_family_index(queue_family_index)
+            .queue_priorities(&queue_priorities)];
+        let device_extension_ptrs = device_extensions
+            .iter()
+            .map(|e| e.as_ptr())
+            .collect::<Vec<*const c_char>>();
+
+        let mut physical_device_features = exposed_adapter
+            .adapter
+            .physical_device_features(&device_extensions, features);
+        let mut ycbcr_features =
+            vk::PhysicalDeviceSamplerYcbcrConversionFeatures::default().sampler_ycbcr_conversion(true);
+        let device_info = physical_device_features
+            .add_to_device_create(
+                vk::DeviceCreateInfo::default()
+                    .queue_create_infos(&queue_infos)
+                    .enabled_extension_names(&device_extension_ptrs),
+            )
+            .push_next(&mut ycbcr_features);
+
+        let raw_device = (bridge.create_device)(get_instance_proc_addr, physical_device, &device_info)
+            .context("xrCreateVulkanDeviceKHR")?;
+        let ash_device = unsafe { ash::Device::load(ash_instance.fp_v1_0(), raw_device) };
+
+        let open_device = unsafe {
+            exposed_adapter.adapter.device_from_raw(
+                ash_device,
+                None, // wgpu-hal owns (and destroys) the device
+                &device_extensions,
+                features,
+                &MemoryHints::Performance,
+                queue_family_index,
+                queue_index,
+            )
+        }
+        .map_err(|e| anyhow!("wgpu-hal Vulkan device: {e:?}"))?;
+
+        let instance = unsafe { Instance::from_hal::<api::Vulkan>(hal_instance) };
+        let adapter = unsafe { instance.create_adapter_from_hal(exposed_adapter) };
+        let (device, queue) = unsafe {
+            adapter.create_device_from_hal(
+                open_device,
+                &DeviceDescriptor {
+                    label: None,
+                    required_features: features,
+                    required_limits: Limits {
+                        max_push_constant_size: MAX_PUSH_CONSTANTS_SIZE,
+                        ..adapter.limits()
+                    },
+                    memory_hints: MemoryHints::Performance,
                 },
-                memory_hints: MemoryHints::Performance,
-            },
-            None,
-        ))
-        .unwrap();
+                None,
+            )
+        }
+        .context("wgpu device from the OpenXR Vulkan device")?;
 
-        let raw_instance = unsafe { instance.as_hal::<api::Gles>() }.unwrap();
-
-        let egl_display = raw_instance.raw_display();
-        let egl_config = raw_instance.egl_config();
-
-        let (
-            egl_context,
-            gl_context,
-            dummy_surface,
-            create_image,
-            destroy_image,
-            get_native_client_buffer,
-            image_target_texture_2d,
-        ) = unsafe {
-            adapter.as_hal::<api::Gles, _, _>(|raw_adapter| {
-                let adapter_context = raw_adapter.unwrap().adapter_context();
-                let egl_instance = adapter_context.egl_instance().unwrap();
-
-                let egl_context = egl::Context::from_ptr(adapter_context.raw_context());
-
-                const PBUFFER_ATTRIBS: [i32; 5] = [egl::WIDTH, 16, egl::HEIGHT, 16, egl::NONE];
-                let dummy_surface = egl_instance
-                    .create_pbuffer_surface(egl_display, egl_config, &PBUFFER_ATTRIBS)
-                    .unwrap();
-
-                egl_instance
-                    .make_current(
-                        egl_display,
-                        Some(dummy_surface),
-                        Some(dummy_surface),
-                        Some(egl_context),
-                    )
-                    .unwrap();
-
-                let gl_context = gl::Context::from_loader_function(|fn_name| {
-                    egl_instance
-                        .get_proc_address(fn_name)
-                        .map_or(ptr::null(), |f| f as *const c_void)
-                });
-
-                let get_fn_ptr = |fn_name| {
-                    egl_instance
-                        .get_proc_address(fn_name)
-                        .map_or(ptr::null(), |f| f as *const c_void)
-                };
-
-                let create_image: CreateImageFn = mem::transmute(get_fn_ptr(CREATE_IMAGE_FN_STR));
-                let destroy_image: DestroyImageFn =
-                    mem::transmute(get_fn_ptr(DESTROY_IMAGE_FN_STR));
-                let get_native_client_buffer: GetNativeClientBufferFn =
-                    mem::transmute(get_fn_ptr(GET_NATIVE_CLIENT_BUFFER_FN_STR));
-                let image_target_texture_2d: ImageTargetTexture2DFn =
-                    mem::transmute(get_fn_ptr(IMAGE_TARGET_TEXTURE_2D_FN_STR));
-
-                (
-                    egl_context,
-                    gl_context,
-                    dummy_surface,
-                    create_image,
-                    destroy_image,
-                    get_native_client_buffer,
-                    image_target_texture_2d,
-                )
-            })
-        };
-
-        Self {
-            _instance: instance,
-            adapter,
+        Ok(Self {
             device,
             queue,
-            egl_display,
-            egl_config,
-            egl_context,
-            gl_context,
-            dummy_surface,
-            create_image,
-            destroy_image,
-            get_native_client_buffer,
-            image_target_texture_2d,
-        }
+            adapter,
+            _instance: instance,
+            vulkan_handles: VulkanSessionHandles {
+                instance: raw_instance,
+                physical_device,
+                device: raw_device,
+                queue_family_index,
+                queue_index,
+            },
+        })
     }
 
-    #[cfg(windows)]
-    pub fn new_gl() -> Self {
-        unimplemented!()
-    }
-
-    pub fn make_current(&self) {
-        #[cfg(not(windows))]
-        unsafe {
-            self.adapter.as_hal::<api::Gles, _, _>(|raw_adapter| {
-                let egl_instance = raw_adapter
-                    .unwrap()
-                    .adapter_context()
-                    .egl_instance()
-                    .unwrap();
-
-                egl_instance
-                    .make_current(
-                        self.egl_display,
-                        Some(self.dummy_surface),
-                        Some(self.dummy_surface),
-                        Some(self.egl_context),
-                    )
-                    .unwrap();
-            })
-        };
-    }
-
-    /// # Safety
-    /// `buffer` must be a valid AHardwareBuffer.
-    /// `texture` must be a valid GL texture.
-    pub unsafe fn render_ahardwarebuffer_using_texture(
-        &self,
-        buffer: *const c_void,
-        texture: gl::Texture,
-        render_cb: impl FnOnce(),
-    ) {
-        const EGL_NATIVE_BUFFER_ANDROID: u32 = 0x3140;
-
-        if !buffer.is_null() {
-            let client_buffer = (self.get_native_client_buffer)(buffer);
-            check_error(&self.gl_context, "get_native_client_buffer");
-
-            let image = (self.create_image)(
-                self.egl_display.as_ptr(),
-                egl::NO_CONTEXT,
-                EGL_NATIVE_BUFFER_ANDROID,
-                client_buffer,
-                ptr::null(),
-            );
-            check_error(&self.gl_context, "create_image");
-
-            self.gl_context
-                .bind_texture(GL_TEXTURE_EXTERNAL_OES, Some(texture));
-            check_error(&self.gl_context, "bind texture OES");
-
-            (self.image_target_texture_2d)(GL_TEXTURE_EXTERNAL_OES, image);
-            check_error(&self.gl_context, "image_target_texture_2d");
-
-            render_cb();
-
-            (self.destroy_image)(self.egl_display.as_ptr(), image);
-            check_error(&self.gl_context, "destroy_image");
-        }
-    }
-}
-
-#[cfg(not(windows))]
-impl Default for GraphicsContext {
-    fn default() -> Self {
-        Self::new_gl()
+    pub fn vulkan_handles(&self) -> VulkanSessionHandles {
+        self.vulkan_handles
     }
 }
