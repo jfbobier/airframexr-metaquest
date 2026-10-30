@@ -12,7 +12,8 @@ use alvr_common::{
     glam::{UVec2, Vec2},
     info,
     parking_lot::RwLock,
-    Pose, RelaxedAtomic, ViewParams, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID,
+    Pose, RelaxedAtomic, ViewParams, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID, LEFT_TRIGGER_CLICK_ID,
+    LEFT_TRIGGER_VALUE_ID, RIGHT_TRIGGER_CLICK_ID, RIGHT_TRIGGER_VALUE_ID,
 };
 use alvr_graphics::{
     compute_target_view_resolution, GraphicsContext, StreamRenderer, StreamViewParams,
@@ -600,6 +601,19 @@ fn stream_input_loop(
         );
 
         let mut button_entries = interaction::update_buttons(&xr_session, &int_ctx.button_actions);
+        // a free hand's trigger is the debounced pinch from hand_taps, not the runtime's raw pinch value
+        button_entries.retain(|entry| {
+            let [left_value, left_click, right_value, right_click] = [
+                *LEFT_TRIGGER_VALUE_ID,
+                *LEFT_TRIGGER_CLICK_ID,
+                *RIGHT_TRIGGER_VALUE_ID,
+                *RIGHT_TRIGGER_CLICK_ID,
+            ];
+            let id = entry.path_id;
+            let raw_left_pinch = hand_driven[0] && (id == left_value || id == left_click);
+            let raw_right_pinch = hand_driven[1] && (id == right_value || id == right_click);
+            !(raw_left_pinch || raw_right_pinch)
+        });
         button_entries.extend(hand_taps.update(
             &xr_session,
             &int_ctx.button_actions,

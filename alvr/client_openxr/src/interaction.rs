@@ -777,11 +777,14 @@ pub fn update_buttons(
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(900);
 const DOUBLE_TAP_MAX_PINCH: Duration = Duration::from_millis(600);
 const DOUBLE_TAP_PULSE: Duration = Duration::from_millis(150);
-// A pinch is read from the trigger value with the mirror's own thresholds (mirrordesktop.cpp: "a hand's pinch or a
-// trigger rarely reaches 1: the button goes down at 0.3 and up at 0.15"). The runtime's boolean click needs a much
-// stronger pinch, so most pinches the mirror counts as a click never reached it and no double pinch was detected.
-const PINCH_DOWN: f32 = 0.3;
-const PINCH_UP: f32 = 0.15;
+// A pinch is read from the runtime's pinch value (the runtime's boolean click needs a much stronger pinch than the mirror
+// counts as a click, so it is not used) and sent to the host as a clean trigger: 1 while pinched, 0 otherwise. The value
+// hovers between 0.15 and 0.3 when the fingers rest loosely together: with the mirror's own thresholds (down 0.3, up 0.15)
+// a click then stayed down for seconds (mirror log, 2026-10-30: median press 0.8 s, 7 of 16 over 1 s, one of 7.5 s, releases
+// logged at 0.12-0.15 while presses started at 0.30-0.44) and selected areas of the desktop. A deliberate squeeze starts a
+// pinch and a clear opening ends it; a pinch is a click, like on the visionOS client.
+const PINCH_DOWN: f32 = 0.45;
+const PINCH_UP: f32 = 0.30;
 
 #[derive(Default, Clone, Copy)]
 struct HandTap {
@@ -797,7 +800,8 @@ pub struct HandTaps([HandTap; 2]);
 
 impl HandTaps {
     /// `hand_driven`: the hand is tracked without a controller (the pinch is read from the trigger
-    /// value, which the hand interaction profile drives); with controllers nothing is emulated.
+    /// value, which the hand interaction profile drives, and sent as a clean trigger value and click);
+    /// with controllers nothing is emulated and the controller's own trigger entries are sent.
     pub fn update(
         &mut self,
         xr_session: &xr::Session<xr::Vulkan>,
@@ -808,10 +812,10 @@ impl HandTaps {
         let mut entries = vec![];
 
         for (h, tap) in self.0.iter_mut().enumerate() {
-            let (trigger_value_id, button_id) = if h == 0 {
-                (*LEFT_TRIGGER_VALUE_ID, *LEFT_X_CLICK_ID)
+            let (trigger_value_id, trigger_click_id, button_id) = if h == 0 {
+                (*LEFT_TRIGGER_VALUE_ID, *LEFT_TRIGGER_CLICK_ID, *LEFT_X_CLICK_ID)
             } else {
-                (*RIGHT_TRIGGER_VALUE_ID, *RIGHT_A_CLICK_ID)
+                (*RIGHT_TRIGGER_VALUE_ID, *RIGHT_TRIGGER_CLICK_ID, *RIGHT_A_CLICK_ID)
             };
 
             let pinch = match button_actions.get(&trigger_value_id) {
@@ -837,6 +841,17 @@ impl HandTaps {
                 tap.began_at = Some(now);
             } else if !down && tap.down {
                 tap.ended_at = Some(now);
+            }
+            // the clean trigger for a free hand (and one last release when the hand stops being hand-driven)
+            if down != tap.down {
+                entries.push(ButtonEntry {
+                    path_id: trigger_value_id,
+                    value: ButtonValue::Scalar(if down { 1.0 } else { 0.0 }),
+                });
+                entries.push(ButtonEntry {
+                    path_id: trigger_click_id,
+                    value: ButtonValue::Binary(down),
+                });
             }
             tap.down = down;
 
