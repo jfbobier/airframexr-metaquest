@@ -1,5 +1,6 @@
 mod average;
 mod connection_result;
+pub mod diag;
 mod inputs;
 mod logging;
 mod primitives;
