@@ -643,6 +643,62 @@ pub fn get_head_data(
     Some((motion, view_params))
 }
 
+/// Meta's own pinch for a hand: the discrete index-pinch bit of XR_FB_hand_tracking_aim, the signal the Quest's system UI and
+/// Meta's SDKs (`OVRHand.GetFingerIsPinching`) use for a select, with the runtime's own hysteresis. The aim state is chained to
+/// a joint locate call, which the high-level openxr call cannot do. `None` when the extension is off, the hand is not tracked,
+/// the aim data is not valid, or a system gesture (the palm-up menu pinch) is active.
+pub fn get_meta_index_pinch(
+    xr_session: &xr::Session<xr::Vulkan>,
+    reference_space: &xr::Space,
+    time: Duration,
+    hand_source: &HandInteraction,
+) -> Option<bool> {
+    let exts = xr_session.instance().exts();
+    exts.fb_hand_tracking_aim.as_ref()?;
+    let fns = exts.ext_hand_tracking.as_ref()?;
+    let tracker = hand_source.skeleton_tracker.as_ref()?;
+    let xr_time = crate::xr_runtime_now(xr_session.instance()).unwrap_or(crate::to_xr_time(time));
+
+    let locate_info = xr::sys::HandJointsLocateInfoEXT {
+        ty: xr::sys::HandJointsLocateInfoEXT::TYPE,
+        next: std::ptr::null(),
+        base_space: reference_space.as_raw(),
+        time: xr_time,
+    };
+    let mut aim = xr::sys::HandTrackingAimStateFB {
+        ty: xr::sys::HandTrackingAimStateFB::TYPE,
+        next: std::ptr::null_mut(),
+        status: xr::HandTrackingAimFlagsFB::EMPTY,
+        aim_pose: xr::Posef::IDENTITY,
+        pinch_strength_index: 0.0,
+        pinch_strength_middle: 0.0,
+        pinch_strength_ring: 0.0,
+        pinch_strength_little: 0.0,
+    };
+    let mut joints = [xr::sys::HandJointLocationEXT {
+        location_flags: xr::SpaceLocationFlags::EMPTY,
+        pose: xr::Posef::IDENTITY,
+        radius: 0.0,
+    }; xr::HAND_JOINT_COUNT];
+    let mut locations = xr::sys::HandJointLocationsEXT {
+        ty: xr::sys::HandJointLocationsEXT::TYPE,
+        next: std::ptr::from_mut(&mut aim).cast(),
+        is_active: false.into(),
+        joint_count: xr::HAND_JOINT_COUNT as u32,
+        joint_locations: joints.as_mut_ptr(),
+    };
+    let result =
+        unsafe { (fns.locate_hand_joints)(tracker.as_raw(), &locate_info, &mut locations) };
+    if result.into_raw() < 0 || !bool::from(locations.is_active) {
+        return None;
+    }
+
+    let status = aim.status;
+    (status.contains(xr::HandTrackingAimFlagsFB::VALID)
+        && !status.contains(xr::HandTrackingAimFlagsFB::SYSTEM_GESTURE))
+    .then(|| status.contains(xr::HandTrackingAimFlagsFB::INDEX_PINCHING))
+}
+
 pub fn get_hand_data(
     xr_session: &xr::Session<xr::Vulkan>,
     reference_space: &xr::Space,
@@ -807,6 +863,7 @@ impl HandTaps {
         xr_session: &xr::Session<xr::Vulkan>,
         button_actions: &HashMap<u64, ButtonAction>,
         hand_driven: [bool; 2],
+        meta_pinch: [Option<bool>; 2],
         now: Instant,
     ) -> Vec<ButtonEntry> {
         let mut entries = vec![];
@@ -826,8 +883,14 @@ impl HandTaps {
                     .map(|s| s.current_state),
                 _ => None,
             };
-            // down at PINCH_DOWN, up at PINCH_UP (hysteresis, like the mirror)
-            let down = pinch.is_some_and(|v| if tap.down { v > PINCH_UP } else { v >= PINCH_DOWN });
+            // Meta's own discrete pinch when the runtime reports it (its hysteresis), else the pinch value with
+            // PINCH_DOWN / PINCH_UP
+            let down = hand_driven[h]
+                && match meta_pinch[h] {
+                    Some(pinching) => pinching,
+                    None => pinch
+                        .is_some_and(|v| if tap.down { v > PINCH_UP } else { v >= PINCH_DOWN }),
+                };
 
             if down && !tap.down {
                 if let (Some(began), Some(ended)) = (tap.began_at, tap.ended_at) {

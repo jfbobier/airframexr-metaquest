@@ -614,10 +614,23 @@ fn stream_input_loop(
             let raw_right_pinch = hand_driven[1] && (id == right_value || id == right_click);
             !(raw_left_pinch || raw_right_pinch)
         });
+        let meta_pinch = [0, 1].map(|h| {
+            hand_driven[h]
+                .then(|| {
+                    interaction::get_meta_index_pinch(
+                        &xr_session,
+                        stage_reference_space,
+                        now,
+                        &int_ctx.hands_interaction[h],
+                    )
+                })
+                .flatten()
+        });
         button_entries.extend(hand_taps.update(
             &xr_session,
             &int_ctx.button_actions,
             hand_driven,
+            meta_pinch,
             Instant::now(),
         ));
         if !button_entries.is_empty() {

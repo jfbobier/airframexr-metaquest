@@ -150,6 +150,7 @@ pub fn entry_point() {
     let mut exts = xr::ExtensionSet::default();
     exts.ext_hand_interaction = available_extensions.ext_hand_interaction;
     exts.ext_hand_tracking = available_extensions.ext_hand_tracking;
+    exts.fb_hand_tracking_aim = available_extensions.fb_hand_tracking_aim;
     exts.ext_local_floor = available_extensions.ext_local_floor;
     exts.fb_body_tracking = available_extensions.fb_body_tracking;
     exts.fb_color_space = available_extensions.fb_color_space;

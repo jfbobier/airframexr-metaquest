@@ -69,6 +69,7 @@ Tested by the author on **one Meta Quest 3**, with the AirFrameXR streamer on an
 - Vulkan rendering of the stream at 90 Hz, HEVC Main10 (10-bit), BT.709 full range, with the AirFrameXR streamer.
 - The RGB chroma key (green key colour).
 - The welcome panel.
+- Controllers, in several different games: all fine.
 - Hand tracking: the pinch clicks in the desktop mirror. It works, but it is imprecise (like on the Vision Pro).
 
 **Not tested, so do not assume it works:** Quest Pro, Quest 2 and Quest 3S; the double pinch since the last fix; the floor-height
