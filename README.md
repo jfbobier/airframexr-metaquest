@@ -37,6 +37,10 @@ device checklist: [`QUEST_VULKAN_PORT.md`](QUEST_VULKAN_PORT.md).
   place of the EGL image and `samplerExternalOES`. The two-pass structure of the GLES client is kept.
 - **App name and icon:** the launcher entry is `AirFrameXR` with the AirFrameXR mark (an adaptive icon built from `branding/` in the
   AirFrameXR repository). The package name is `airframexr.client`, so it installs next to a stock ALVR client without touching it.
+- **Hands as controllers** (like the visionOS client): with free hands the client binds `XR_EXT_hand_interaction`, sends the hand
+  as that hand's controller (pose, pinch = trigger) next to the skeleton, and two pinches in a row (under 0.6 s each, the
+  second within 0.9 s) raise X (left) or A (right) for 0.15 s, which the desktop mirror reads as a double click. Controllers are
+  unchanged. It is off when the streamer's own `hand_tracking_interaction` or multimodal input is on. Target SDK 34.
 - **Colour comes from what the stream declares.** The AirFrameXR chain is HEVC Main10 (10-bit), BT.709, full range, SDR.
   For that case the conversion is created as BT.709 full range and the GLES limited-range shader remap is gone. HDR or a
   limited-range stream keep the driver's values. The log prints what the driver suggested.
