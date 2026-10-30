@@ -660,18 +660,18 @@ pub struct MetaPinch {
 // Joint indices of XR_EXT_hand_tracking: palm 0; fingertips: middle 15, ring 20, little 25.
 const PALM_JOINT: usize = 0;
 const FINGERTIP_JOINTS: [usize; 3] = [15, 20, 25];
-// A closed hand is not a pinch, although thumb and index touch in it (the mirror log of 2026-10-30 shows a trigger held at
-// 1.0 for 30 s with the hand closed). The hand is a fist when at least two of the middle, ring and little fingertips are
-// closer to the palm than this (an open hand: about 0.17 m; relaxed: about 0.13; closed: about 0.05). First guess, to be
-// tuned from the [hands] lines of a capture.
-const FIST_TIP_TO_PALM: f32 = 0.085;
+// A closed hand is not a pinch (the mirror log of 2026-10-30 shows a trigger held at 1.0 for 30 s with the hand closed).
+// Measured on a Quest 3 (capture of 2026-10-31 00:09, fingertip to palm distances): a held fist 0.03-0.048 m for all three
+// fingers; a pinch, whose other fingers curl a little, 0.057-0.07 m; a relaxed open hand 0.10-0.14 m. The hand is a fist when
+// all three (middle, ring, little) are closer than this. (A first guess of 0.085 m with two fingers rejected real pinches.)
+const FIST_TIP_TO_PALM: f32 = 0.052;
 
 pub fn fingertip_palm_distances(joints: &[Pose; 26]) -> [f32; 3] {
     FINGERTIP_JOINTS.map(|j| joints[j].position.distance(joints[PALM_JOINT].position))
 }
 
 pub fn is_fist(distances: [f32; 3]) -> bool {
-    distances.iter().filter(|d| **d < FIST_TIP_TO_PALM).count() >= 2
+    distances.iter().all(|d| *d < FIST_TIP_TO_PALM)
 }
 
 pub fn get_meta_pinch(
@@ -895,8 +895,10 @@ const DOUBLE_TAP_MIN_PINCH: Duration = Duration::from_millis(40);
 // a click then stayed down for seconds (mirror log, 2026-10-30: median press 0.8 s, 7 of 16 over 1 s, one of 7.5 s, releases
 // logged at 0.12-0.15 while presses started at 0.30-0.44) and selected areas of the desktop. A deliberate squeeze starts a
 // pinch and a clear opening ends it; a pinch is a click, like on the visionOS client.
-const PINCH_DOWN: f32 = 0.45;
-const PINCH_UP: f32 = 0.30;
+// Measured (same capture): the index strength of a closed hand hovers at 0.41-0.50, a deliberate pinch reaches 0.7-1.0, so a
+// pinch starts above 0.6 and ends below 0.4 (the first guess of 0.45 / 0.30 let a closed hand start a click that never ended).
+const PINCH_DOWN: f32 = 0.60;
+const PINCH_UP: f32 = 0.40;
 
 #[derive(Default, Clone, Copy)]
 struct HandTap {

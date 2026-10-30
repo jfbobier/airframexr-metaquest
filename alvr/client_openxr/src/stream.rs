@@ -639,9 +639,6 @@ fn stream_input_loop(
                 .into_iter()
                 .enumerate()
             {
-                if !hand_driven[h] {
-                    continue;
-                }
                 let aim =
                     interaction::get_hand_aim_pose(stage_reference_space, now, &int_ctx.hands_interaction[h]);
                 if let (Some(sent), Some(aim)) = (motion.map(|m| m.pose), aim) {
@@ -650,7 +647,8 @@ fn stream_input_loop(
                     let forward_gap = (sent.orientation * alvr_common::glam::Vec3::NEG_Z)
                         .angle_between(aim.orientation * alvr_common::glam::Vec3::NEG_Z);
                     alvr_common::error!(
-                        "[hands] {name} sent vs aim: yaw {:.0} pitch {:.0} roll {:.0} deg, forward gap {:.0} deg, position gap {:.1} cm, fist {} tip-palm m {:?}, meta pinch {:?}",
+                        "[hands] {name} {} sent vs aim: yaw {:.0} pitch {:.0} roll {:.0} deg, forward gap {:.0} deg, position gap {:.1} cm, fist {} tip-palm m {:?}, meta pinch {:?}",
+                        if hand_driven[h] { "HAND" } else { "CONTROLLER" },
                         yaw.to_degrees(),
                         pitch.to_degrees(),
                         roll.to_degrees(),
