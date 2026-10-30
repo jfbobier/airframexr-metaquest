@@ -75,7 +75,7 @@ Live: `adb logcat -s AirFrameXR-diag:V`. Our normal lines, when they pass the st
 | `QC2V4l2Codec ... Ignore resolution setting when o/p port is streaming` | Qualcomm codec | Vendor message: the decoder is configured with a placeholder size (512x1024, see the comment in `android.rs`) and then runs at the stream size. Benign. |
 | `VideoRenderQualityTracker: Video playback content time jumped N ms forward`, `Rendered frame is earlier than the next expected frame` | Android media framework | Compares the frame timestamps we give MediaCodec (the streamer's tracking times) with real time. A steady jump of about 33 ms means the frames' timestamps are 33 ms apart, i.e. a 30 fps stream: cross-check with `new` in the `[diag]` line. Not a client error. |
 | `VrApi: FPS=.. Stale=.. Early=.. Tear=..` | Meta runtime, every second | The compositor's own view: `Stale` > 0 means it had to repeat the app's previous frame (the app was late). Good cross-check for `submit interval over1.5x`. |
-| `[CT] PTApiClients: ... alvr.client.stable, PT=1, ... LCnt=a/b(rec=.., proj=.., bg=..)` | Meta runtime | Per-app layer accounting: `PT=1` = the app has an active passthrough layer; `proj` counts projection layers. Useful next to our `[layers]` line. |
+| `[CT] PTApiClients: ... airframexr.client, PT=1, ... LCnt=a/b(rec=.., proj=.., bg=..)` | Meta runtime | Per-app layer accounting: `PT=1` = the app has an active passthrough layer; `proj` counts projection layers. Useful next to our `[layers]` line. |
 
 ## What this build does not do
 

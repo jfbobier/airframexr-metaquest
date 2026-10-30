@@ -36,7 +36,7 @@ device checklist: [`QUEST_VULKAN_PORT.md`](QUEST_VULKAN_PORT.md).
 - **The decoder's `AHardwareBuffer` is imported as a Vulkan image** with an immutable YCbCr sampler (the staging pass), in
   place of the EGL image and `samplerExternalOES`. The two-pass structure of the GLES client is kept.
 - **App name and icon:** the launcher entry is `AirFrameXR` with the AirFrameXR mark (an adaptive icon built from `branding/` in the
-  AirFrameXR repository). The package name stays `alvr.client.stable`.
+  AirFrameXR repository). The package name is `airframexr.client`, so it installs next to a stock ALVR client without touching it.
 - **Colour comes from what the stream declares.** The AirFrameXR chain is HEVC Main10 (10-bit), BT.709, full range, SDR.
   For that case the conversion is created as BT.709 full range and the GLES limited-range shader remap is gone. HDR or a
   limited-range stream keep the driver's values. The log prints what the driver suggested.
@@ -48,12 +48,11 @@ against the stock client and no profile of this one.
 
 ## Install (sideload)
 
-The APK is signed with a debug key. It uses the stock ALVR client's package name (`alvr.client.stable`), so a stock ALVR
-client already on the headset has to be uninstalled first (Android refuses a different signature).
+The APK is signed with a debug key. Its package name is `airframexr.client`, so it installs next to a stock ALVR client and does
+not replace it. Pairing is stored per package: the first time, pair it from the streamer ("Find headset...").
 
 ```
-adb uninstall alvr.client.stable
-adb install -r airframexr-quest-0.1.0-alpha1.apk
+adb install -r airframexr-quest-0.1.0-alpha2.apk
 ```
 
 Then start the AirFrameXR streamer on the PC and connect as with any ALVR client.
