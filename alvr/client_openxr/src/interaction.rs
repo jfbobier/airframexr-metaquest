@@ -833,6 +833,8 @@ pub fn update_buttons(
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(900);
 const DOUBLE_TAP_MAX_PINCH: Duration = Duration::from_millis(600);
 const DOUBLE_TAP_PULSE: Duration = Duration::from_millis(150);
+// A pinch shorter than this is the pinch signal flickering, not a pinch: it cannot be the first of a double.
+const DOUBLE_TAP_MIN_PINCH: Duration = Duration::from_millis(40);
 // A pinch is read from the runtime's pinch value (the runtime's boolean click needs a much stronger pinch than the mirror
 // counts as a click, so it is not used) and sent to the host as a clean trigger: 1 while pinched, 0 otherwise. The value
 // hovers between 0.15 and 0.3 when the fingers rest loosely together: with the mirror's own thresholds (down 0.3, up 0.15)
@@ -849,6 +851,9 @@ struct HandTap {
     ended_at: Option<Instant>,
     pulse_until: Option<Instant>,
     pulse_sent: bool,
+    // this pinch is the second of a double: it must not be the first of the next one (a run of quick pinches was
+    // raising a new double click on every pinch: four in 0.7 s in the mirror log of 2026-10-30 23:48)
+    consumed: bool,
 }
 
 #[derive(Default)]
@@ -894,16 +899,20 @@ impl HandTaps {
 
             if down && !tap.down {
                 if let (Some(began), Some(ended)) = (tap.began_at, tap.ended_at) {
+                    let first_pinch = ended.duration_since(began);
                     if ended > began
                         && now.duration_since(ended) < DOUBLE_TAP_WINDOW
-                        && ended.duration_since(began) < DOUBLE_TAP_MAX_PINCH
+                        && first_pinch >= DOUBLE_TAP_MIN_PINCH
+                        && first_pinch < DOUBLE_TAP_MAX_PINCH
                     {
                         tap.pulse_until = Some(now + DOUBLE_TAP_PULSE);
+                        tap.consumed = true;
                     }
                 }
                 tap.began_at = Some(now);
             } else if !down && tap.down {
-                tap.ended_at = Some(now);
+                tap.ended_at = if tap.consumed { None } else { Some(now) };
+                tap.consumed = false;
             }
             // the clean trigger for a free hand (and one last release when the hand stops being hand-driven)
             if down != tap.down {
