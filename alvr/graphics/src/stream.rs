@@ -63,7 +63,7 @@ impl StreamRenderer {
         target_format: u32,
         foveated_encoding: Option<FoveatedEncodingConfig>,
         enable_srgb_correction: bool,
-        fix_limited_range: bool,
+        declared_full_range_bt709: bool,
         encoding_gamma: f32,
         upscaling: Option<UpscalingConfig>,
     ) -> Self {
@@ -224,7 +224,7 @@ impl StreamRenderer {
             staging_textures.try_into().unwrap(),
             target_format,
             staging_resolution,
-            fix_limited_range,
+            declared_full_range_bt709,
         );
 
         Self {

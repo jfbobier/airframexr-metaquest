@@ -199,7 +199,7 @@ impl StreamContext {
             format,
             config.foveated_encoding_config.clone(),
             platform != Platform::Lynx && !((platform.is_pico()) && config.enable_hdr),
-            config.use_full_range && !config.enable_hdr, // TODO: figure out why HDR doesn't need the limited range hackfix in staging?
+            config.use_full_range && !config.enable_hdr, // the stream declares BT.709 full range (SDR only); HDR keeps the driver's values like GLES
             config.encoding_gamma,
             config.upscaling.clone(),
         );

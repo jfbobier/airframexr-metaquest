@@ -133,7 +133,7 @@ pub struct StagingRenderer {
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     queue_family_index: u32,
 
-    fix_limited_range: bool,
+    declared_full_range_bt709: bool,
     target_format: vk::Format,
     extent: vk::Extent2D,
 
@@ -157,7 +157,7 @@ impl StagingRenderer {
         staging_textures: [Texture; 2],
         target_format: wgpu::TextureFormat,
         view_resolution: UVec2,
-        fix_limited_range: bool,
+        declared_full_range_bt709: bool,
     ) -> Self {
         let (instance, device, queue_family_index, physical_device) = unsafe {
             context.device.as_hal::<api::Vulkan, _, _>(|device| {
@@ -291,7 +291,7 @@ impl StagingRenderer {
             ahb_fn,
             memory_properties,
             queue_family_index,
-            fix_limited_range,
+            declared_full_range_bt709,
             target_format,
             extent,
             render_pass,
@@ -458,16 +458,6 @@ impl StagingRenderer {
             "vkCreatePipelineLayout",
         );
 
-        // FIX_LIMITED_RANGE specialization constant (a VkBool32)
-        let specialization_data = (self.fix_limited_range as u32).to_le_bytes();
-        let specialization_entries = [vk::SpecializationMapEntry::default()
-            .constant_id(0)
-            .offset(0)
-            .size(4)];
-        let specialization_info = vk::SpecializationInfo::default()
-            .map_entries(&specialization_entries)
-            .data(&specialization_data);
-
         let stages = [
             vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::VERTEX)
@@ -476,8 +466,7 @@ impl StagingRenderer {
             vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::FRAGMENT)
                 .module(self.fragment_module)
-                .name(c"main")
-                .specialization_info(&specialization_info),
+                .name(c"main"),
         ];
         let vertex_input = vk::PipelineVertexInputStateCreateInfo::default();
         let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
@@ -578,11 +567,26 @@ impl StagingRenderer {
         let linear_chroma_filter = format_properties.format_features.contains(
             vk::FormatFeatureFlags::SAMPLED_IMAGE_YCBCR_CONVERSION_LINEAR_FILTER,
         );
+        // The stream declares its own colour space (VUI: BT.709, full range; the NVENC conversion was
+        // measured to match). GLES let the driver pick and fixed its limited-range guess in the
+        // shader; here the declared values are used directly, so there is nothing to fix. Without a
+        // declaration (HDR, limited range) the driver's suggestion is kept, as GLES did.
+        let (model, range) = if self.declared_full_range_bt709 {
+            (
+                vk::SamplerYcbcrModelConversion::YCBCR_709,
+                vk::SamplerYcbcrRange::ITU_FULL,
+            )
+        } else {
+            (
+                format_properties.suggested_ycbcr_model,
+                format_properties.suggested_ycbcr_range,
+            )
+        };
         let key = YcbcrKey {
             format: format_properties.format.as_raw(),
             external_format: format_properties.external_format,
-            model: format_properties.suggested_ycbcr_model.as_raw(),
-            range: format_properties.suggested_ycbcr_range.as_raw(),
+            model: model.as_raw(),
+            range: range.as_raw(),
             x_chroma_offset: format_properties.suggested_x_chroma_offset.as_raw(),
             y_chroma_offset: format_properties.suggested_y_chroma_offset.as_raw(),
             components: [
@@ -602,7 +606,11 @@ impl StagingRenderer {
             .as_ref()
             .is_none_or(|state| state.key != key);
         if key_changed {
-            alvr_common::info!("Staging: decoder buffer format {key:?}");
+            alvr_common::info!(
+                "Staging: decoder buffer format {key:?} (driver suggested model {:?} range {:?})",
+                format_properties.suggested_ycbcr_model,
+                format_properties.suggested_ycbcr_range
+            );
 
             // Frames in flight reference the old objects
             self.wait_for_gpu();

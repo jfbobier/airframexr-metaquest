@@ -16,7 +16,7 @@ Target: Quest 3 first, Quest Pro supported, Quest 2 best effort. HEVC only (no A
 | swapchain formats `SRGB8_ALPHA8 / RGBA8 / RGBA16F` (GL enums) | `VkFormat` `R8G8B8A8_SRGB / R8G8B8A8_UNORM / R16G16B16A16_SFLOAT`, same priority order, same HDR rule, same RGBA8 fallback |
 | `create_gl_swapchain`: GL texture ids -> wgpu textures (`texture_from_raw`) | `create_vk_swapchain`: `VkImage`s -> wgpu textures (`hal::vulkan::Device::texture_from_raw`, no ownership) |
 | staging pass: EGLImage + `samplerExternalOES` + GL FBO per eye | `staging.rs`: AHardwareBuffer imported as a VkImage (external format), immutable YCbCr sampler, raw render pass per eye into the wgpu staging texture, **recorded inline in wgpu's command buffer** (`CommandEncoder::as_hal_mut` + `raw_handle`) so the order (staging first, then reprojection) is the GLES one and wgpu's own fence tells when the imported buffer is free |
-| `staging_vertex/fragment.glsl` (ESSL 300) | `staging_vertex.vert`, `staging_fragment.frag` (GLSL 450, same maths), committed as SPIR-V (`compile_staging_shaders.sh`, glslc from the NDK). `#ifdef FIX_LIMITED_RANGE` is a specialization constant |
+| `staging_vertex/fragment.glsl` (ESSL 300) | `staging_vertex.vert`, `staging_fragment.frag` (GLSL 450, same maths), committed as SPIR-V (`compile_staging_shaders.sh`, glslc from the NDK). the GLES `FIX_LIMITED_RANGE` remap is removed (see Colour) |
 | `view_idx` uniform | push constant |
 | `eglCreateImage` / `eglDestroyImage` per frame | `vkCreateImage` + import `vkAllocateMemory` + view + descriptor set per frame, freed when wgpu reports the submission done (no caching, 1:1 with GLES) |
 | manifest `opengles_version 3.2` | `android.hardware.vulkan.version` 0x401000 (1.1) |
@@ -49,7 +49,7 @@ composition layer settings, lobby, interaction, timing order: unchanged.
 ## Unverified / risks, most likely first
 
 1. **Colour range and matrix.** GLES let the driver convert; Vulkan uses the buffer's *suggested*
-   model/range. The existing `FIX_LIMITED_RANGE` remap is kept as is. Check black and white levels.
+   model/range, except for SDR full-range streams where BT.709 full range is forced (see Colour). Check black and white levels.
 2. **Upside-down or mirrored picture** (deviation 1; also the staging orientation, derived on paper).
 3. **Layout / sync with wgpu** for the staging texture (contract in the `staging.rs` header). Symptoms:
    flicker, one black frame at stream start, validation errors.
@@ -65,3 +65,18 @@ composition layer settings, lobby, interaction, timing order: unchanged.
 4. Foveated encoding on/off, upscaling on/off, passthrough blend and chroma key.
 5. Lobby <-> stream <-> lobby, headset doff/don, stream restart with a different codec (format change path).
 6. Repeat on Quest 3, Quest Pro, Quest 2. A debug build with the validation layer, if it can be side-loaded.
+
+## Colour (changed after the first port commit)
+
+The streamer declares BT.709, full range, sRGB transfer in the VUI (`nvenc/upstream/platform/win32/VideoEncoderNVENC.cpp`,
+`use_full_range` is forced on by `tools/host/src/nvidia_profile.rs`). The host's own colour-fit measurement of NVENC's
+reconstruction against its input is BT.709 full range, gain 0.996-0.998, offset about 0 (`docs/BENCHMARK_DESIGN.md`), so the
+declaration and the conversion agree. That was measured on the bench's P010 reconstruction, not on the bytes the Quest decodes.
+
+- SDR and `use_full_range`: the YCbCr conversion is created with `YCBCR_709` + `ITU_FULL` instead of the driver's suggestion, and the
+  GLES `FIX_LIMITED_RANGE` shader remap is deleted. GLES squeezed RGB into 16-235 to undo the driver's limited-range guess; that
+  remap also scaled chroma by 219/224 (about 2 % less saturation than a true full-range decode), so the output can differ slightly.
+- HDR, or a limited-range stream: the driver's suggested model and range are kept, as GLES did (GLES needed no fix there).
+- The log line `Staging: decoder buffer format ...` now also prints what the driver suggested. First device check: if the suggested
+  range is already `ITU_FULL` and model `YCBCR_709`, the override is a no-op; otherwise compare a grey ramp.
+- Untested risk: some drivers may reject or ignore an application-chosen model/range on an external-format conversion.
