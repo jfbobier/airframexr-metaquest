@@ -1,11 +1,10 @@
-use super::{GraphicsContext, MAX_PUSH_CONSTANTS_SIZE, SDR_FORMAT};
-use alvr_common::{
-    glam::{IVec2, Mat4, Quat, UVec2, Vec3},
-    DeviceMotion, Fov, Pose,
+use super::{
+    panel::{self, PanelState, HUD_DIST, HUD_SIDE, HUD_TEXTURE_SIDE},
+    GraphicsContext, MAX_PUSH_CONSTANTS_SIZE, SDR_FORMAT,
 };
-use glyph_brush_layout::{
-    ab_glyph::{Font, FontRef, ScaleFont},
-    FontId, GlyphPositioner, HorizontalAlign, Layout, SectionGeometry, SectionText, VerticalAlign,
+use alvr_common::{
+    glam::{Mat4, Quat, UVec2, Vec3},
+    DeviceMotion, Fov, Pose,
 };
 use std::{f32::consts::FRAC_PI_2, mem, rc::Rc};
 use wgpu::{
@@ -40,22 +39,6 @@ const FLOOR_SIDE_CONST_OFFSET: u32 = OBJECT_TYPE_CONST_OFFSET + OBJECT_TYPE_CONS
 const COLOR_CONST_OFFSET: u32 = TRANSFORM_CONST_SIZE;
 
 const FLOOR_SIDE: f32 = 300.0;
-const HUD_DIST: f32 = 5.0;
-const HUD_SIDE: f32 = 3.5;
-const HUD_TEXTURE_SIDE: usize = 1024;
-const FONT_SIZE: f32 = 50.0;
-
-const FAST_BORDER_OFFSETS: [IVec2; 8] = [
-    IVec2::new(0, -3),
-    IVec2::new(2, -2),
-    IVec2::new(3, 0),
-    IVec2::new(2, 2),
-    IVec2::new(0, 3),
-    IVec2::new(-2, 2),
-    IVec2::new(-3, 0),
-    IVec2::new(-2, -2),
-];
-const MAX_BORDER_OFFSET: i32 = 3;
 
 const HAND_SKELETON_BONES: [(usize, usize); 19] = [
     // Thumb
@@ -222,8 +205,16 @@ pub struct LobbyViewParams {
     pub fov: Fov,
 }
 
+/// A pointing ray drawn from `origin` to `end` (the welcome panel's pointer).
+pub struct LobbyPointer {
+    pub origin: Vec3,
+    pub end: Vec3,
+    pub pressed: bool,
+}
+
 pub struct LobbyRenderer {
     context: Rc<GraphicsContext>,
+    panel_static_layer: Vec<u8>,
     quad_pipeline: RenderPipeline,
     line_pipeline: RenderPipeline,
     hud_texture: Texture,
@@ -236,7 +227,7 @@ impl LobbyRenderer {
         context: Rc<GraphicsContext>,
         view_resolution: UVec2,
         swapchain_textures: [Vec<u64>; 2],
-        initial_hud_message: &str,
+        initial_panel_state: &PanelState,
     ) -> Self {
         let device = &context.device;
 
@@ -313,6 +304,7 @@ impl LobbyRenderer {
 
         let this = Self {
             context,
+            panel_static_layer: panel::render_static(),
             quad_pipeline,
             line_pipeline,
             hud_texture,
@@ -320,69 +312,14 @@ impl LobbyRenderer {
             render_targets,
         };
 
-        this.update_hud_message(initial_hud_message);
+        this.update_panel(initial_panel_state);
 
         this
     }
 
-    pub fn update_hud_message(&self, message: &str) {
-        let ubuntu_font =
-            FontRef::try_from_slice(include_bytes!("../resources/Ubuntu-Medium.ttf")).unwrap();
-
-        let section_glyphs = Layout::default()
-            .h_align(HorizontalAlign::Center)
-            .v_align(VerticalAlign::Center)
-            .calculate_glyphs(
-                &[&ubuntu_font],
-                &SectionGeometry {
-                    screen_position: (
-                        HUD_TEXTURE_SIDE as f32 / 2_f32,
-                        HUD_TEXTURE_SIDE as f32 / 2_f32,
-                    ),
-                    ..Default::default()
-                },
-                &[SectionText {
-                    text: message,
-                    scale: FONT_SIZE.into(),
-                    font_id: FontId(0),
-                }],
-            );
-
-        let scaled_font = ubuntu_font.as_scaled(FONT_SIZE);
-
-        let mut buffer = vec![0; HUD_TEXTURE_SIDE * HUD_TEXTURE_SIDE * 4];
-
-        for section_glyph in section_glyphs {
-            if let Some(outlined) = scaled_font.outline_glyph(section_glyph.glyph) {
-                let bounds = outlined.px_bounds();
-
-                outlined.draw(|x, y, alpha| {
-                    let x = x as i32 + bounds.min.x as i32;
-                    let y = y as i32 + bounds.min.y as i32;
-
-                    if x >= MAX_BORDER_OFFSET
-                        && y >= MAX_BORDER_OFFSET
-                        && x < HUD_TEXTURE_SIDE as i32 - MAX_BORDER_OFFSET
-                        && y < HUD_TEXTURE_SIDE as i32 - MAX_BORDER_OFFSET
-                    {
-                        let coord = (y as usize * HUD_TEXTURE_SIDE + x as usize) * 4;
-                        let value = (alpha * 255.0) as u8;
-
-                        buffer[coord] = value;
-                        buffer[coord + 1] = value;
-                        buffer[coord + 2] = value;
-
-                        // Render opacity with border
-                        for offset in &FAST_BORDER_OFFSETS {
-                            let coord = ((y + offset.y) as usize * HUD_TEXTURE_SIDE
-                                + (x + offset.x) as usize)
-                                * 4;
-                            buffer[coord + 3] = u8::max(buffer[coord + 3], value);
-                        }
-                    }
-                });
-            }
-        }
+    /// Draws the welcome panel for `state` into the HUD texture.
+    pub fn update_panel(&self, state: &PanelState) {
+        let buffer = panel::render(&self.panel_static_layer, state);
 
         self.context.queue.write_texture(
             TexelCopyTextureInfo {
@@ -413,6 +350,7 @@ impl LobbyRenderer {
         additional_motions: Option<Vec<DeviceMotion>>,
         body_skeleton: Option<Vec<Option<Pose>>>,
         body_tracking_type: Option<BodyTrackingType>,
+        pointers: &[LobbyPointer],
         render_background: bool,
         show_velocities: bool,
     ) {
@@ -598,6 +536,29 @@ impl LobbyRenderer {
                 for motion in motions {
                     draw_crosshair(&mut pass, motion, view_proj, show_velocities);
                 }
+            }
+
+            // Render the welcome panel's pointers
+            for pointer in pointers {
+                let ray = pointer.end - pointer.origin;
+                if ray.length() < 1e-3 {
+                    continue;
+                }
+                pass.set_push_constants(
+                    ShaderStages::VERTEX_FRAGMENT,
+                    COLOR_CONST_OFFSET,
+                    &if pointer.pressed {
+                        [255, 255, 255, 255]
+                    } else {
+                        [0, 230, 245, 255]
+                    },
+                );
+                let transform = Mat4::from_scale_rotation_translation(
+                    Vec3::ONE * ray.length(),
+                    Quat::from_rotation_arc(-Vec3::Z, ray.normalize()),
+                    pointer.origin,
+                );
+                transform_draw(&mut pass, view_proj * transform, 2);
             }
 
             let body_skeleton_bones = match body_tracking_type {

@@ -1,8 +1,10 @@
 mod lobby;
+mod panel;
 mod staging;
 mod stream;
 
 pub use lobby::*;
+pub use panel::*;
 pub use stream::*;
 
 use alvr_common::{
