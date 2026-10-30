@@ -377,6 +377,9 @@ pub(crate) fn render_static() -> Vec<u8> {
     canvas.px
 }
 
+/// The AirFrameXR Quest client version (also `version_name` in alvr/client_openxr/Cargo.toml).
+const CLIENT_VERSION: &str = "0.9.0";
+
 /// The whole panel for `state`, over the static layer.
 pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
     let font = font();
@@ -384,7 +387,7 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         px: static_layer.to_vec(),
     };
 
-    // Subtitle: "AirFrameXR client 20.14.1" -> "Quest client 20.14.1"
+    // Subtitle: the info line starts with "AirFrameXR client <ALVR protocol version>"; shown as "Quest client <ours> · ALVR <protocol>"
     let version = state
         .info
         .lines()
@@ -393,7 +396,7 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         .unwrap_or("");
     canvas.draw_text(
         &font,
-        &format!("Quest client {version} · alpha").replace("  ", " "),
+        &format!("Quest client {CLIENT_VERSION} · ALVR {version}").replace("  ", " "),
         38.0,
         MUTED,
         (266.0, 206.0),

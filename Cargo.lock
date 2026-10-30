@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "alvr_client_openxr"
-version = "20.14.1"
+version = "0.9.0"
 dependencies = [
  "alvr_client_core",
  "alvr_common",

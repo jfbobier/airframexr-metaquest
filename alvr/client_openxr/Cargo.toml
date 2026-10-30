@@ -1,6 +1,6 @@
 [package]
 name = "alvr_client_openxr"
-version.workspace = true
+version = "0.9.0"   # AirFrameXR Quest client version: cargo-apk turns it into versionName/versionCode. The ALVR protocol version the streamer checks is alvr_common's, still 20.14.1
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true

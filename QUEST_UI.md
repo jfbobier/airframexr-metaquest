@@ -8,7 +8,7 @@ The picture is the real rasteriser (`alvr/graphics/src/panel.rs`) run on a PC wi
 
 ## What it shows
 
-- **Header:** the AirFrameXR mark and name, `Quest client <version> . alpha`.
+- **Header:** the AirFrameXR mark and name, `Quest client <our version> . ALVR <protocol version>`.
 - **Status:** the connection message (searching, connecting, stream starting, errors). The "Open ALVR ... click Trust" text is now "On the PC, click Find headset... and pick this headset", the AirFrameXR streamer's pairing step (`docs/INSTALL.md` of the AirFrameXR repo).
 - **Floor height**, the visionOS client's semantics: the headset's own height above the floor (live), a manual offset of -50..+50 cm in 1 cm steps (**-**, **+**, **Reset**; hold to repeat), and what the game will see (headset + offset).
 - **Small print:** hostname and IP of the headset.

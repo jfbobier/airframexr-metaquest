@@ -27,7 +27,7 @@ alvr_system_info = { path = "alvr/system_info" }
 
 [profile.release]
 debug = "limited"
-strip = false
+strip = true
 
 [profile.distribution]
 inherits = "release"
