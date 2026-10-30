@@ -2,9 +2,10 @@
 
 > ## ALPHA TEST ONLY
 >
-> This client **builds, but has never been run on a headset.** Nothing in it has been seen working: not the
-> lobby, not a stream, not a single frame. Expect a black screen, a crash, a wrong picture or no connection. Do
-> not use it for anything you care about. If you want a Quest client that works today, use the stock
+> This client is an early build. The author has run it on **one Quest 3**, where the Vulkan renderer worked from the
+> first launch. Nothing more is recorded: the checks below (colour levels, orientation, foveation, passthrough,
+> restart) have not been written up, and **Quest Pro and Quest 2 have not been tried.** Expect rough edges, and do
+> not rely on it. If you want a Quest client that is proven, use the stock
 > [ALVR client](https://github.com/alvr-org/ALVR/releases).
 
 The Quest client of [AirFrameXR](https://github.com/jfbobier/AirFrameXR), wireless PC VR for NVIDIA cards: the PC
@@ -34,6 +35,8 @@ device checklist: [`QUEST_VULKAN_PORT.md`](QUEST_VULKAN_PORT.md).
   by function, and anything that differs is listed in the notes.
 - **The decoder's `AHardwareBuffer` is imported as a Vulkan image** with an immutable YCbCr sampler (the staging pass), in
   place of the EGL image and `samplerExternalOES`. The two-pass structure of the GLES client is kept.
+- **App name and icon:** the launcher entry is `AirFrameXR` with the AirFrameXR mark (an adaptive icon built from `branding/` in the
+  AirFrameXR repository). The package name stays `alvr.client.stable`.
 - **Colour comes from what the stream declares.** The AirFrameXR chain is HEVC Main10 (10-bit), BT.709, full range, SDR.
   For that case the conversion is created as BT.709 full range and the GLES limited-range shader remap is gone. HDR or a
   limited-range stream keep the driver's values. The log prints what the driver suggested.
