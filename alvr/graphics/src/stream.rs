@@ -418,7 +418,7 @@ fn passthrough_constants(config: Option<&PassthroughMode>) -> PassthroughConstan
 pub fn passthrough_diag_string(config: Option<&PassthroughMode>) -> String {
     let constants = passthrough_constants(config);
     let mut text = format!(
-        "passthrough_mode={} (0 blend, 1 RGB key, 2 HSV key; the shader switches to HSV on the value 3) blend_alpha={}",
+        "passthrough_mode={} (0 blend, 1 RGB key, 2 HSV key) blend_alpha={}",
         constants.mode, constants.alpha
     );
     if let Some([c0, c1, c2]) = constants.channels {
