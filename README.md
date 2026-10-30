@@ -41,7 +41,7 @@ device checklist are in [`QUEST_VULKAN_PORT.md`](QUEST_VULKAN_PORT.md); the welc
   `com.oculus` name.
 - **Quest only.** Everything that served other headsets (Pico, YVR, Lynx, HTC and ByteDance extensions, their OpenXR loaders,
   per-platform workarounds, unused dependencies) was removed: about 1,500 lines. With debug symbols stripped, the APK went from
-  26.6 MB to 3.5 MB. (Crash reports will have no symbol names; the author keeps the unstripped library of each release.)
+  26.6 MB to 3.5 MB. (Crash reports will have no symbol names.)
 - **App identity.** Package `airframexr.client`, label `AirFrameXR`, the AirFrameXR launcher icon. It installs next to a stock
   ALVR client and does not replace it.
 - **HSV chroma key fix.** The shader tested the wrong mode number for the HSV key, so HSV mode compared RGB values against HSV
@@ -56,11 +56,12 @@ device checklist are in [`QUEST_VULKAN_PORT.md`](QUEST_VULKAN_PORT.md); the welc
 
 **Hand tracking**
 
-- **Hands as controllers for the desktop mirror**, like the AirFrameXR Vision Pro client: with free hands, the hand pose is sent
-  as that hand's controller and a **pinch is its trigger**; a **second pinch within 0.9 s of a short first one is that hand's X
-  (left) or A (right) button**, which the AirFrameXR desktop mirror reads as a double click. It uses OpenXR
-  `XR_EXT_hand_interaction`, and reads the pinch value with the mirror's own thresholds (down at 0.3, up at 0.15). When
-  controllers are held nothing changes: the controller path is the stock one.
+- **Hands as controllers for the desktop mirror, EXPERIMENTAL.** Like the AirFrameXR Vision Pro client: with free hands, the hand
+  pose is sent as that hand's controller and a **pinch is its trigger**; a **second pinch within 0.9 s of a short first one is
+  that hand's X (left) or A (right) button**, which the AirFrameXR desktop mirror reads as a double click. It uses OpenXR
+  `XR_EXT_hand_interaction` for the pose and Meta's own pinch signal (`XR_FB_hand_tracking_aim`) when the runtime reports it, else
+  the pinch strength (a pinch starts above 0.6 and ends below 0.4, measured on one Quest 3). When controllers are held nothing
+  changes: the controller path is the stock one. **Hand pinch is still experimental: see the known issues below.**
 
 ## What was tested
 
@@ -70,14 +71,22 @@ Tested by the author on **one Meta Quest 3**, with the AirFrameXR streamer on an
 - The RGB chroma key (green key colour).
 - The welcome panel.
 - Controllers, in several different games: all fine.
-- Hand tracking: the pinch clicks in the desktop mirror. It works, but it is imprecise (like on the Vision Pro).
+- Hand tracking, early builds: a pinch clicks in the desktop mirror, imprecisely. The final thresholds below were chosen from a
+  measured capture and **have not been run on a headset**.
 
-**Not tested, so do not assume it works:** Quest Pro, Quest 2 and Quest 3S; the double pinch since the last fix; the floor-height
+**Not tested, so do not assume it works:** Quest Pro, Quest 2 and Quest 3S; hand pinch and the double pinch in this release; the floor-height
 offset in a game; the HSV chroma key; long sessions; wired (USB) use and the streamer's USB autolaunch; the Vulkan validation
 layers (no release build ran with them, so the absence of warnings is not proof that the raw Vulkan code is correct).
 
-**Known issues:** the pinch is noisy, so a click can stutter. With both hands pinching, the streamer's desktop mirror can switch
-its beam from one hand to the other every few milliseconds (the logic is in the mirror, not in this client).
+**Known issues, hand pinch is experimental:**
+- The pinch signal is noisy and Meta's own pinch bit is often not reported at the moment of a pinch, so a click can stutter or
+  need a firm pinch. A closed hand used to hold a click for seconds; the new thresholds should stop that, but this is not verified.
+- The pointing beam is built from the hand's grip pose, which can be 50 to 95 degrees away from the system's own aim ray, so
+  hand pointing can be off, and **the left hand did not register reliably in testing**. A fix needs a measured offset and was
+  not done.
+- With both hands pinching, the streamer's desktop mirror can switch its beam from one hand to the other every few milliseconds
+  (that logic is in the mirror, not in this client). Its first pinch from the idle hand only takes over the beam.
+- Controllers are the reliable way to point and click for now.
 
 ## Install (sideload)
 

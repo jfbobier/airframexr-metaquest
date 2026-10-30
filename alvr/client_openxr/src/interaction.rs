@@ -647,39 +647,12 @@ pub fn get_head_data(
 /// Meta's SDKs (`OVRHand.GetFingerIsPinching`) use for a select, with the runtime's own hysteresis. The aim state is chained to
 /// a joint locate call, which the high-level openxr call cannot do. `None` when the extension is off, the hand is not tracked,
 /// the aim data is not valid, or a system gesture (the palm-up menu pinch) is active.
-#[derive(Clone, Copy, Debug)]
-pub struct MetaPinch {
-    pub index: bool,
-    pub middle: bool,
-    pub ring: bool,
-    pub little: bool,
-    /// pinch strength of the index, middle, ring and little fingers (0 to 1)
-    pub strength: [f32; 4],
-}
-
-// Joint indices of XR_EXT_hand_tracking: palm 0; fingertips: middle 15, ring 20, little 25.
-const PALM_JOINT: usize = 0;
-const FINGERTIP_JOINTS: [usize; 3] = [15, 20, 25];
-// A closed hand is not a pinch (the mirror log of 2026-10-30 shows a trigger held at 1.0 for 30 s with the hand closed).
-// Measured on a Quest 3 (capture of 2026-10-31 00:09, fingertip to palm distances): a held fist 0.03-0.048 m for all three
-// fingers; a pinch, whose other fingers curl a little, 0.057-0.07 m; a relaxed open hand 0.10-0.14 m. The hand is a fist when
-// all three (middle, ring, little) are closer than this. (A first guess of 0.085 m with two fingers rejected real pinches.)
-const FIST_TIP_TO_PALM: f32 = 0.052;
-
-pub fn fingertip_palm_distances(joints: &[Pose; 26]) -> [f32; 3] {
-    FINGERTIP_JOINTS.map(|j| joints[j].position.distance(joints[PALM_JOINT].position))
-}
-
-pub fn is_fist(distances: [f32; 3]) -> bool {
-    distances.iter().all(|d| *d < FIST_TIP_TO_PALM)
-}
-
-pub fn get_meta_pinch(
+pub fn get_meta_index_pinch(
     xr_session: &xr::Session<xr::Vulkan>,
     reference_space: &xr::Space,
     time: Duration,
     hand_source: &HandInteraction,
-) -> Option<MetaPinch> {
+) -> Option<bool> {
     let exts = xr_session.instance().exts();
     exts.fb_hand_tracking_aim.as_ref()?;
     let fns = exts.ext_hand_tracking.as_ref()?;
@@ -723,34 +696,7 @@ pub fn get_meta_pinch(
     let status = aim.status;
     (status.contains(xr::HandTrackingAimFlagsFB::VALID)
         && !status.contains(xr::HandTrackingAimFlagsFB::SYSTEM_GESTURE))
-    .then(|| MetaPinch {
-        index: status.contains(xr::HandTrackingAimFlagsFB::INDEX_PINCHING),
-        middle: status.contains(xr::HandTrackingAimFlagsFB::MIDDLE_PINCHING),
-        ring: status.contains(xr::HandTrackingAimFlagsFB::RING_PINCHING),
-        little: status.contains(xr::HandTrackingAimFlagsFB::LITTLE_PINCHING),
-        strength: [
-            aim.pinch_strength_index,
-            aim.pinch_strength_middle,
-            aim.pinch_strength_ring,
-            aim.pinch_strength_little,
-        ],
-    })
-}
-
-/// The hand's aim pose (the runtime's own pointing ray), for the hand diagnostics.
-pub fn get_hand_aim_pose(
-    reference_space: &xr::Space,
-    time: Duration,
-    hand_source: &HandInteraction,
-) -> Option<Pose> {
-    let location = hand_source
-        .aim_space
-        .locate(reference_space, crate::to_xr_time(time))
-        .ok()?;
-    location
-        .location_flags
-        .contains(xr::SpaceLocationFlags::ORIENTATION_VALID | xr::SpaceLocationFlags::POSITION_VALID)
-        .then(|| crate::from_xr_pose(location.pose))
+    .then(|| status.contains(xr::HandTrackingAimFlagsFB::INDEX_PINCHING))
 }
 
 pub fn get_hand_data(
@@ -924,8 +870,7 @@ impl HandTaps {
         xr_session: &xr::Session<xr::Vulkan>,
         button_actions: &HashMap<u64, ButtonAction>,
         hand_driven: [bool; 2],
-        meta_pinch: [Option<MetaPinch>; 2],
-        fist: [bool; 2],
+        meta_pinch: [Option<bool>; 2],
         now: Instant,
     ) -> Vec<ButtonEntry> {
         let mut entries = vec![];
@@ -948,9 +893,8 @@ impl HandTaps {
             // Meta's own discrete pinch when the runtime reports it (its hysteresis), else the pinch value with
             // PINCH_DOWN / PINCH_UP
             let down = hand_driven[h]
-                && !fist[h]
                 && match meta_pinch[h] {
-                    Some(meta) => meta.index,
+                    Some(pinching) => pinching,
                     None => pinch
                         .is_some_and(|v| if tap.down { v > PINCH_UP } else { v >= PINCH_DOWN }),
                 };
@@ -974,15 +918,6 @@ impl HandTaps {
             }
             // the clean trigger for a free hand (and one last release when the hand stops being hand-driven)
             if down != tap.down {
-                // TEMPORARY diagnostics (warn level so they pass the streamer's log filter): one line per pinch edge
-                alvr_common::error!(
-                    "[hands] {} pinch {} fist {} meta {:?} value {:?}",
-                    if h == 0 { "left" } else { "right" },
-                    if down { "DOWN" } else { "up" },
-                    fist[h],
-                    meta_pinch[h],
-                    pinch
-                );
                 entries.push(ButtonEntry {
                     path_id: trigger_value_id,
                     value: ButtonValue::Scalar(if down { 1.0 } else { 0.0 }),
