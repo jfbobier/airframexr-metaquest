@@ -122,9 +122,9 @@ fn create_session(
     xr_system: xr::SystemId,
     graphics_context: &GraphicsContext,
 ) -> (
-    xr::Session<xr::OpenGlEs>,
+    xr::Session<xr::Vulkan>,
     xr::FrameWaiter,
-    xr::FrameStream<xr::OpenGlEs>,
+    xr::FrameStream<xr::Vulkan>,
 ) {
     unsafe {
         xr_instance
@@ -159,8 +159,7 @@ pub fn entry_point() {
     let available_extensions = xr_entry.enumerate_extensions().unwrap();
     alvr_common::info!("OpenXR available extensions: {available_extensions:#?}");
 
-    // todo: switch to vulkan
-    assert!(available_extensions.khr_opengl_es_enable);
+    assert!(available_extensions.khr_vulkan_enable2);
 
     let mut exts = xr::ExtensionSet::default();
     exts.bd_controller_interaction = available_extensions.bd_controller_interaction;
@@ -186,7 +185,7 @@ pub fn entry_point() {
         exts.khr_android_create_instance = true;
     }
     exts.khr_convert_timespec_time = true;
-    exts.khr_opengl_es_enable = true;
+    exts.khr_vulkan_enable2 = true;
     exts.other = available_extensions
         .other
         .into_iter()
@@ -219,7 +218,24 @@ pub fn entry_point() {
         )
         .unwrap();
 
-    let graphics_context = Rc::new(GraphicsContext::new_gl());
+    // The Vulkan instance and device are created by the OpenXR runtime and reused by all sessions,
+    // as the GL context was.
+    let graphics_context = {
+        let xr_system = xr_instance
+            .system(xr::FormFactor::HEAD_MOUNTED_DISPLAY)
+            .unwrap();
+
+        // mandatory call
+        let requirements = xr_instance
+            .graphics_requirements::<xr::Vulkan>(xr_system)
+            .unwrap();
+
+        Rc::new(graphics::create_graphics_context(
+            &xr_instance,
+            xr_system,
+            &requirements,
+        ))
+    };
 
     let mut last_lobby_message = String::new();
 
@@ -230,7 +246,7 @@ pub fn entry_point() {
 
         // mandatory call
         let _ = xr_instance
-            .graphics_requirements::<xr::OpenGlEs>(xr_system)
+            .graphics_requirements::<xr::Vulkan>(xr_system)
             .unwrap();
 
         let (xr_session, mut xr_frame_waiter, mut xr_frame_stream) =
@@ -496,7 +512,6 @@ pub fn entry_point() {
                     &[&layer.build()]
                 };
 
-            graphics_context.make_current();
             let res = xr_frame_stream.end(
                 to_xr_time(display_time),
                 xr::EnvironmentBlendMode::OPAQUE,

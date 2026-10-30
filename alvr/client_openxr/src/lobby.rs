@@ -5,7 +5,7 @@ use crate::{
 };
 use alvr_common::{glam::UVec2, parking_lot::RwLock, Pose};
 use alvr_graphics::{
-    BodyTrackingType, GraphicsContext, LobbyRenderer, LobbyViewParams, SDR_FORMAT_GL,
+    BodyTrackingType, GraphicsContext, LobbyRenderer, LobbyViewParams, SDR_FORMAT_VK,
 };
 use alvr_system_info::Platform;
 use openxr as xr;
@@ -13,11 +13,11 @@ use std::{rc::Rc, sync::Arc, time::Duration};
 
 // todo: add interaction?
 pub struct Lobby {
-    xr_session: xr::Session<xr::OpenGlEs>,
+    xr_session: xr::Session<xr::Vulkan>,
     interaction_ctx: Arc<RwLock<InteractionContext>>,
     platform: Platform,
     reference_space: xr::Space,
-    swapchains: [xr::Swapchain<xr::OpenGlEs>; 2],
+    swapchains: [xr::Swapchain<xr::Vulkan>; 2],
     view_resolution: UVec2,
     reference_space_type: xr::ReferenceSpaceType,
     renderer: LobbyRenderer,
@@ -25,7 +25,7 @@ pub struct Lobby {
 
 impl Lobby {
     pub fn new(
-        xr_session: xr::Session<xr::OpenGlEs>,
+        xr_session: xr::Session<xr::Vulkan>,
         gfx_ctx: Rc<GraphicsContext>,
         interaction_ctx: Arc<RwLock<InteractionContext>>,
         platform: Platform,
@@ -43,8 +43,8 @@ impl Lobby {
         let reference_space = interaction::get_reference_space(&xr_session, reference_space_type);
 
         let swapchains = [
-            graphics::create_swapchain(&xr_session, &gfx_ctx, view_resolution, SDR_FORMAT_GL, None),
-            graphics::create_swapchain(&xr_session, &gfx_ctx, view_resolution, SDR_FORMAT_GL, None),
+            graphics::create_swapchain(&xr_session, &gfx_ctx, view_resolution, SDR_FORMAT_VK, None),
+            graphics::create_swapchain(&xr_session, &gfx_ctx, view_resolution, SDR_FORMAT_VK, None),
         ];
 
         let renderer = LobbyRenderer::new(

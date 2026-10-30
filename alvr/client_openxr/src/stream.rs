@@ -89,11 +89,11 @@ impl ParsedStreamConfig {
 
 pub struct StreamContext {
     core_context: Arc<ClientCoreContext>,
-    xr_session: xr::Session<xr::OpenGlEs>,
+    xr_session: xr::Session<xr::Vulkan>,
     interaction_context: Arc<RwLock<InteractionContext>>,
     stage_reference_space: Arc<xr::Space>,
     view_reference_space: Arc<xr::Space>,
-    swapchains: [xr::Swapchain<xr::OpenGlEs>; 2],
+    swapchains: [xr::Swapchain<xr::Vulkan>; 2],
     last_good_view_params: [ViewParams; 2],
     input_thread: Option<JoinHandle<()>>,
     input_thread_running: Arc<RelaxedAtomic>,
@@ -107,7 +107,7 @@ pub struct StreamContext {
 impl StreamContext {
     pub fn new(
         core_ctx: Arc<ClientCoreContext>,
-        xr_session: xr::Session<xr::OpenGlEs>,
+        xr_session: xr::Session<xr::Vulkan>,
         gfx_ctx: Rc<GraphicsContext>,
         interaction_ctx: Arc<RwLock<InteractionContext>>,
         platform: Platform,
@@ -514,7 +514,7 @@ impl Drop for StreamContext {
 
 fn stream_input_loop(
     core_ctx: &ClientCoreContext,
-    xr_session: xr::Session<xr::OpenGlEs>,
+    xr_session: xr::Session<xr::Vulkan>,
     interaction_ctx: &RwLock<InteractionContext>,
     stage_reference_space: &xr::Space,
     view_reference_space: &xr::Space,

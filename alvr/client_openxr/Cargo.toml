@@ -17,6 +17,7 @@ alvr_packets.workspace = true
 alvr_session.workspace = true
 alvr_system_info.workspace = true
 
+ash = "0.38"
 openxr = { git = "https://github.com/Ralith/openxrs", rev = "9270509d23dc774b43a8b7289e8adf69fcac6828" }
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -52,7 +53,8 @@ name = "android.hardware.vr.headtracking"
 required = true
 version = 1
 [[package.metadata.android.uses_feature]]
-opengles_version = [3, 2]
+name = "android.hardware.vulkan.version"
+version = 0x00401000 # Vulkan 1.1
 required = true
 
 [[package.metadata.android.uses_permission]]
