@@ -37,9 +37,9 @@ use crate::audio;
 use alvr_audio as audio;
 
 const INITIAL_MESSAGE: &str = concat!(
-    "Searching for streamer...\n",
-    "Open ALVR on your PC then click \"Trust\"\n",
-    "next to the device entry",
+    "Searching for the AirFrameXR streamer...\n",
+    "On the PC, click \"Find headset...\"\n",
+    "and pick this headset",
 );
 const NETWORK_UNREACHABLE_MESSAGE: &str = "Cannot connect to the streamer.\nNetwork error.";
 const SUCCESS_CONNECT_MESSAGE: &str = "Successful connection!\nPlease wait...";
@@ -82,9 +82,11 @@ pub struct ConnectionContext {
     pub max_prediction: RwLock<Duration>,
 }
 
+// The welcome panel (client_openxr lobby) splits this message at the first blank line: the lines
+// before it (client version, hostname, IP) are the panel's small print, the rest is the status.
 fn set_hud_message(event_queue: &Mutex<VecDeque<ClientCoreEvent>>, message: &str) {
     let message = format!(
-        "ALVR v{}\nhostname: {}\nIP: {}\n\n{message}",
+        "AirFrameXR client {}\nhostname: {}\nIP: {}\n\n{message}",
         *ALVR_VERSION,
         Config::load().hostname,
         alvr_system_info::local_ip(),

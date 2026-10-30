@@ -20,6 +20,11 @@ fn config_path() -> PathBuf {
 pub struct Config {
     pub hostname: String,
     pub protocol_id: String,
+
+    /// Floor height offset in centimetres, added to whatever height the headset reports (positive
+    /// raises the player in the game). 0 = the headset's reading as is.
+    #[serde(default)]
+    pub height_offset_cm: i32,
 }
 
 impl Default for Config {
@@ -35,6 +40,7 @@ impl Default for Config {
                 rng.random_range(0..10),
             ),
             protocol_id: alvr_common::protocol_id(),
+            height_offset_cm: 0,
         }
     }
 }

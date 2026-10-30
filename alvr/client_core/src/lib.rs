@@ -40,6 +40,23 @@ use storage::Config;
 
 pub use logging_backend::init_logging;
 
+/// Range of the floor height offset the user can set, in centimetres.
+pub const HEIGHT_OFFSET_RANGE_CM: std::ops::RangeInclusive<i32> = -50..=50;
+
+/// The user's floor height offset in centimetres, stored on the headset (`Config::height_offset_cm`).
+pub fn height_offset_cm() -> i32 {
+    Config::load()
+        .height_offset_cm
+        .clamp(*HEIGHT_OFFSET_RANGE_CM.start(), *HEIGHT_OFFSET_RANGE_CM.end())
+}
+
+pub fn set_height_offset_cm(offset_cm: i32) {
+    let mut config = Config::load();
+    config.height_offset_cm =
+        offset_cm.clamp(*HEIGHT_OFFSET_RANGE_CM.start(), *HEIGHT_OFFSET_RANGE_CM.end());
+    config.store();
+}
+
 pub enum ClientCoreEvent {
     UpdateHudMessage(String),
     StreamingStarted(Box<StreamConfig>),
