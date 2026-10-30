@@ -1,4 +1,4 @@
-use alvr_common::SlidingWindowAverage;
+use alvr_common::{diag, SlidingWindowAverage};
 use alvr_packets::ClientStatistics;
 use std::{
     collections::VecDeque,
@@ -17,6 +17,9 @@ pub struct StatisticsManager {
     prev_vsync: Instant,
     total_pipeline_latency_average: SlidingWindowAverage<Duration>,
     steamvr_pipeline_latency: Duration,
+    // diagnostics only: when the previous frame's packet arrived and its timestamp
+    last_packet: Option<(Instant, Duration)>,
+    nominal_frame_interval: Duration,
 }
 
 impl StatisticsManager {
@@ -36,6 +39,8 @@ impl StatisticsManager {
             steamvr_pipeline_latency: Duration::from_secs_f32(
                 steamvr_pipeline_frames * nominal_server_frame_interval.as_secs_f32(),
             ),
+            last_packet: None,
+            nominal_frame_interval: nominal_server_frame_interval,
         }
     }
 
@@ -62,6 +67,21 @@ impl StatisticsManager {
     }
 
     pub fn report_video_packet_received(&mut self, target_timestamp: Duration) {
+        // diagnostics: gap between the arrival of consecutive frames (network jitter shows here)
+        let now = Instant::now();
+        match self.last_packet {
+            Some((_, last_timestamp)) if last_timestamp == target_timestamp => (), // same frame
+            Some((last_instant, _)) => {
+                let gap = now.saturating_duration_since(last_instant);
+                diag::RX_GAP.add(gap);
+                if gap.as_secs_f32() > 1.5 * self.nominal_frame_interval.as_secs_f32() {
+                    diag::RX_GAP_OVER.inc();
+                }
+                self.last_packet = Some((now, target_timestamp));
+            }
+            None => self.last_packet = Some((now, target_timestamp)),
+        }
+
         if let Some(frame) = self
             .history_buffer
             .iter_mut()
@@ -79,6 +99,7 @@ impl StatisticsManager {
         {
             frame.client_stats.video_decode =
                 Instant::now().saturating_duration_since(frame.video_packet_received);
+            diag::DECODE.add(frame.client_stats.video_decode);
         }
     }
 
@@ -91,6 +112,7 @@ impl StatisticsManager {
             frame.client_stats.video_decoder_queue = Instant::now().saturating_duration_since(
                 frame.video_packet_received + frame.client_stats.video_decode,
             );
+            diag::DECODER_QUEUE.add(frame.client_stats.video_decoder_queue);
         }
     }
 
@@ -114,6 +136,9 @@ impl StatisticsManager {
                 now.saturating_duration_since(frame.input_acquired) + vsync_queue;
             self.total_pipeline_latency_average
                 .submit_sample(frame.client_stats.total_pipeline_latency);
+            diag::RENDERING.add(frame.client_stats.rendering);
+            diag::PIPELINE.add(frame.client_stats.total_pipeline_latency);
+            diag::VSYNC_QUEUE.add(vsync_queue);
 
             let vsync = now + vsync_queue;
             frame.client_stats.frame_interval = vsync.saturating_duration_since(self.prev_vsync);

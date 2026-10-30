@@ -331,11 +331,14 @@ fn connection_pipeline(
                 if let Some(stats) = &mut *ctx.statistics_manager.lock() {
                     stats.report_video_packet_received(header.timestamp);
                 }
+                alvr_common::diag::VIDEO_PACKETS.inc();
 
                 if header.is_idr {
                     stream_corrupted = false;
                 } else if data.had_packet_loss() {
                     stream_corrupted = true;
+                    alvr_common::diag::PACKET_LOSS.inc();
+                    alvr_common::diag::IDR_REQUESTS.inc();
                     if let Some(sender) = &mut *ctx.control_sender.lock() {
                         sender.send(&ClientControlPacket::RequestIdr).ok();
                     }
@@ -351,12 +354,16 @@ fn connection_pipeline(
 
                     if !submitted {
                         stream_corrupted = true;
+                        alvr_common::diag::DROP_SATURATION.inc();
+                        alvr_common::diag::IDR_REQUESTS.inc();
                         if let Some(sender) = &mut *ctx.control_sender.lock() {
                             sender.send(&ClientControlPacket::RequestIdr).ok();
                         }
                         warn!("Dropped video packet. Reason: Decoder saturation")
                     }
                 } else {
+                    alvr_common::diag::DROP_WAIT_IDR.inc();
+                    alvr_common::diag::IDR_REQUESTS.inc();
                     if let Some(sender) = &mut *ctx.control_sender.lock() {
                         sender.send(&ClientControlPacket::RequestIdr).ok();
                     }
