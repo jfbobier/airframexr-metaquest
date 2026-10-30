@@ -150,7 +150,7 @@ fn fragment_main(@location(0) uv: vec2f) -> @location(0) vec4f {
     var alpha = pc.blend_alpha; // Default to Blend passthrough mode
     if pc.passthrough_mode != 0 { // Chroma key
         var current = color;
-        if pc.passthrough_mode == 3 { // HSV mode
+        if pc.passthrough_mode == 2 { // HSV mode (the Rust side sends 2, see set_passthrough_push_constants)
             current = rgb_to_hsv(color);
         }
         let mask = chroma_key_mask(current);
