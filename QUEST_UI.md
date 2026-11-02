@@ -13,7 +13,7 @@ The picture is the real rasteriser (`alvr/graphics/src/panel.rs`) run on a PC wi
 - **Floor height**, the visionOS client's semantics: the headset's own height above the floor (live), a manual offset of -50..+50 cm in 1 cm steps (**-**, **+**, **Reset**; hold to repeat), and what the game will see (headset + offset).
 - **Small print:** hostname and IP of the headset.
 
-There is no Enter button: Quest connects by itself, the panel is the lobby and goes away when the stream starts. Dropped on purpose: the chaperone setting (the Quest boundary is a system feature with no app API), performance stats (not worth anything on the render path), "hands as controllers" and "auto-connect" (nothing on Quest corresponds to them).
+There is no Enter button: Quest connects by itself, the panel is the lobby and goes away when the stream starts. Dropped on purpose: the chaperone setting (the Quest boundary is a system feature with no app API), performance stats (not worth anything on the render path), "auto-connect" (nothing on Quest corresponds to them).
 
 ## Where the offset lives and is applied
 
@@ -23,19 +23,17 @@ There is no Enter button: Quest connects by itself, the panel is the lobby and g
 
 ## Pointing
 
-- Controllers: the aim pose is the ray, the trigger is the click (only when the hand has no tracked skeleton, so a controller lying on a table does not point).
-- Hands: a ray from an estimated shoulder (head position, 20 cm down, 17 cm to the side) through the pinch point (thumb tip and index tip); pinching (under 2 cm, released at 3.5 cm) is the click.
-- A ray is drawn from the controller or pinch point to the panel (cyan, white while pressed). The panel is the old HUD's four quads, 3.5 m wide at 5 m, so a ray hits it wherever the wearer looks; hit testing uses the same geometry (`panel_hit`).
+- Controllers: the aim pose is the ray, the trigger is the click (only when the hand has no tracked skeleton, so a controller lying on a table does not point). Hands do not point: hand pinch was removed in 1.0 (not reliable).
+- A ray is drawn from the controller to the panel (cyan, white while pressed). The panel is the old HUD's four quads, 3.5 m wide at 5 m, so a ray hits it wherever the wearer looks; hit testing uses the same geometry (`panel_hit`).
 
 ## Not verified, check on the headset
 
 1. The panel is visible, upright, readable at 5 m, and not too bright or too dark; the mark is there.
 2. A controller ray appears and follows the aim; the trigger presses **-** / **+** / **Reset**; holding repeats; the value and "game" height change.
-3. Hand tracking only: the pinch ray lands where the fingers point; if it is off (the shoulder guess), note by how much.
 4. The headset height reads about your real eye height (1.6 m standing); if it reads 0 or garbage the lobby's `LOCAL_FLOOR` space is not what was assumed.
 5. Set +10 cm, start a game: the game's floor/eye height is 10 cm higher than before, hands and head line up, nothing swims when moving the head. Then -10 and 0. The stream logs `Floor height offset: ... m` at its start.
 6. Quit and relaunch the app: the offset is still there.
 7. The connection messages appear in the status area and fit (longest: "Cannot connect to the streamer." + "Network error.").
 8. Quest 3, Pro, Quest 2 (not tried).
 
-Open risks: the `STAGE` space origin on some runtimes is at the floor of the guardian, so "height" differs from the lobby's `LOCAL_FLOOR` reading by the floor offset, if the two floors disagree (then the readout shows a number slightly different from the true headset height in the game; the offset itself is still applied correctly because it is relative). The aim pose of a controller held in multimodal mode may be reported while the hand is the real pointer (handled by preferring the tracked hand).
+Open risks: the `STAGE` space origin on some runtimes is at the floor of the guardian, so "height" differs from the lobby's `LOCAL_FLOOR` reading by the floor offset, if the two floors disagree (then the readout shows a number slightly different from the true headset height in the game; the offset itself is still applied correctly because it is relative). The aim pose of a controller held in multimodal mode may be reported while the hand is the real pointer (only a controller whose hand has no tracked skeleton points).

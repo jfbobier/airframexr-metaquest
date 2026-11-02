@@ -19,15 +19,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-// Hand tracking has no trigger: a pinch (thumb tip to index tip) is the click.
-const HAND_JOINT_THUMB_TIP: usize = 5;
-const HAND_JOINT_INDEX_TIP: usize = 10;
-const PINCH_DOWN_DISTANCE: f32 = 0.02;
-const PINCH_UP_DISTANCE: f32 = 0.035;
-// The pinch ray starts at an estimated shoulder and goes through the pinch point
-const SHOULDER_DROP: f32 = 0.20;
-const SHOULDER_SIDE: f32 = 0.17;
-
 const TRIGGER_DOWN: f32 = 0.7;
 const TRIGGER_UP: f32 = 0.4;
 
@@ -63,7 +54,6 @@ pub struct Lobby {
     last_repeat: Instant,
     last_height_readout: Option<Instant>,
     trigger_down: [bool; 2],
-    pinch_down: [bool; 2],
 }
 
 impl Lobby {
@@ -131,7 +121,6 @@ impl Lobby {
             last_repeat: Instant::now(),
             last_height_readout: None,
             trigger_down: [false; 2],
-            pinch_down: [false; 2],
         }
     }
 
@@ -185,12 +174,10 @@ impl Lobby {
         }
     }
 
-    // Pointing rays of the controllers (aim pose, trigger) and of the tracked hands (pinch), each
-    // with the panel button it lands on. `head` is the eye position, used to place the shoulders.
+    // Pointing rays of the controllers (aim pose, trigger), each with the panel button it lands on.
     fn pointers(
         &mut self,
         vsync_time: Duration,
-        head: Pose,
         hand_data: &[(Option<alvr_common::DeviceMotion>, Option<[Pose; 26]>); 2],
     ) -> Vec<Pointer> {
         let mut pointers = vec![];
@@ -205,7 +192,7 @@ impl Lobby {
             );
             let trigger = self.trigger_pressed(hand_idx);
             self.trigger_down[hand_idx] = trigger;
-            // A controller that is not held (multimodal) still has a pose but the hand is the pointer
+            // A controller that is not held (multimodal) still has a pose: only a held one points
             if let (Some(pose), true) = (aim_pose, hand_data[hand_idx].1.is_none()) {
                 let dir = pose.orientation * -Vec3::Z;
                 if let Some(hit) = panel_hit(pose.position, dir) {
@@ -216,41 +203,6 @@ impl Lobby {
                         pressed: trigger,
                     });
                 }
-            }
-
-            // Hand
-            if let Some(joints) = &hand_data[hand_idx].1 {
-                let thumb = joints[HAND_JOINT_THUMB_TIP].position;
-                let index = joints[HAND_JOINT_INDEX_TIP].position;
-                let distance = thumb.distance(index);
-                let pinching = if self.pinch_down[hand_idx] {
-                    distance < PINCH_UP_DISTANCE
-                } else {
-                    distance < PINCH_DOWN_DISTANCE
-                };
-                self.pinch_down[hand_idx] = pinching;
-
-                let pinch_point = (thumb + index) / 2.0;
-                let mut right = head.orientation * Vec3::X;
-                right.y = 0.0;
-                let side = if hand_idx == 0 {
-                    -SHOULDER_SIDE
-                } else {
-                    SHOULDER_SIDE
-                };
-                let shoulder =
-                    head.position + Vec3::new(0.0, -SHOULDER_DROP, 0.0) + right.normalize_or_zero() * side;
-
-                if let Some(hit) = panel_hit(pinch_point, pinch_point - shoulder) {
-                    pointers.push(Pointer {
-                        origin: pinch_point,
-                        hit_point: hit.point,
-                        button: hit.button,
-                        pressed: pinching,
-                    });
-                }
-            } else {
-                self.pinch_down[hand_idx] = false;
             }
         }
 
@@ -325,7 +277,7 @@ impl Lobby {
                 / 2.0,
             orientation: crate::from_xr_pose(views[0].pose).orientation,
         };
-        let pointers = self.pointers(vsync_time, head, &[left_hand_data.clone(), right_hand_data.clone()]);
+        let pointers = self.pointers(vsync_time, &[left_hand_data.clone(), right_hand_data.clone()]);
 
         // The pointer that presses a button wins, then the first one on the panel
         let chosen = pointers

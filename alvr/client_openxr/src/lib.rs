@@ -292,7 +292,6 @@ pub fn entry_point() {
             face_tracking: None,
             body_tracking: Some(lobby_body_tracking_config),
             prefers_multimodal_input: true,
-            hands_as_controllers: false, // the lobby panel points with its own hand logic
         };
         interaction_context
             .write()

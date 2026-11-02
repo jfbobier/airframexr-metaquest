@@ -12,8 +12,7 @@ use alvr_common::{
     glam::{UVec2, Vec2},
     info,
     parking_lot::RwLock,
-    Pose, RelaxedAtomic, ViewParams, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID, LEFT_TRIGGER_CLICK_ID,
-    LEFT_TRIGGER_VALUE_ID, RIGHT_TRIGGER_CLICK_ID, RIGHT_TRIGGER_VALUE_ID,
+    Pose, RelaxedAtomic, ViewParams, HAND_LEFT_ID, HAND_RIGHT_ID, HEAD_ID,
 };
 use alvr_graphics::{
     compute_target_view_resolution, GraphicsContext, StreamRenderer, StreamViewParams,
@@ -497,7 +496,6 @@ fn stream_input_loop(
     let mut last_controller_poses = [Pose::default(); 2];
     let mut last_palm_poses = [Pose::default(); 2];
     let mut last_view_params = [ViewParams::default(); 2];
-    let mut hand_taps = interaction::HandTaps::default();
 
     let mut deadline = Instant::now();
     let frame_interval = Duration::from_secs_f32(1.0 / refresh_rate);
@@ -554,20 +552,12 @@ fn stream_input_loop(
 
         // Note: When multimodal input is enabled, we are sure that when free hands are used
         // (not holding controllers) the controller data is None.
-        // Free hands drive controllers when hands_as_controllers (see InteractionContext): the pose the hand
-        // interaction profile gives for the grip is sent next to the skeleton, like the visionOS client does.
-        let hands_as_controllers = int_ctx.hands_as_controllers;
-        let hand_driven = [
-            hands_as_controllers && left_hand_skeleton.is_some(),
-            hands_as_controllers && right_hand_skeleton.is_some(),
-        ];
-
-        if int_ctx.multimodal_hands_enabled || hand_driven[0] || left_hand_skeleton.is_none() {
+        if int_ctx.multimodal_hands_enabled || left_hand_skeleton.is_none() {
             if let Some(motion) = left_hand_motion {
                 device_motions.push((*HAND_LEFT_ID, motion));
             }
         }
-        if int_ctx.multimodal_hands_enabled || hand_driven[1] || right_hand_skeleton.is_none() {
+        if int_ctx.multimodal_hands_enabled || right_hand_skeleton.is_none() {
             if let Some(motion) = right_hand_motion {
                 device_motions.push((*HAND_RIGHT_ID, motion));
             }
@@ -600,39 +590,7 @@ fn stream_input_loop(
             face_data,
         );
 
-        let mut button_entries = interaction::update_buttons(&xr_session, &int_ctx.button_actions);
-        // a free hand's trigger is the debounced pinch from hand_taps, not the runtime's raw pinch value
-        button_entries.retain(|entry| {
-            let [left_value, left_click, right_value, right_click] = [
-                *LEFT_TRIGGER_VALUE_ID,
-                *LEFT_TRIGGER_CLICK_ID,
-                *RIGHT_TRIGGER_VALUE_ID,
-                *RIGHT_TRIGGER_CLICK_ID,
-            ];
-            let id = entry.path_id;
-            let raw_left_pinch = hand_driven[0] && (id == left_value || id == left_click);
-            let raw_right_pinch = hand_driven[1] && (id == right_value || id == right_click);
-            !(raw_left_pinch || raw_right_pinch)
-        });
-        let meta_pinch = [0, 1].map(|h| {
-            hand_driven[h]
-                .then(|| {
-                    interaction::get_meta_index_pinch(
-                        &xr_session,
-                        stage_reference_space,
-                        now,
-                        &int_ctx.hands_interaction[h],
-                    )
-                })
-                .flatten()
-        });
-        button_entries.extend(hand_taps.update(
-            &xr_session,
-            &int_ctx.button_actions,
-            hand_driven,
-            meta_pinch,
-            Instant::now(),
-        ));
+        let button_entries = interaction::update_buttons(&xr_session, &int_ctx.button_actions);
         if !button_entries.is_empty() {
             core_ctx.send_buttons(button_entries);
         }

@@ -2,10 +2,10 @@
 
 The Meta Quest client of [AirFrameXR](https://github.com/jfbobier/AirFrameXR): wireless PC VR for NVIDIA cards. The PC runs the
 game through AirFrameXR's OpenXR runtime (frame generation, foveated encoding, NVENC), streams it with the **ALVR protocol
-version 20** (20.14.1), and this app shows it on the headset, with hand tracking that drives the desktop mirror.
+version 20** (20.14.1), and this app shows it on the headset, and the controllers drive the game and the desktop mirror.
 
-**Version 0.9.0. Tested on a Meta Quest 3 only** (see [What was tested](#what-was-tested)). Quest Pro and Quest 2 are the
-intended targets too, but nobody has run it on them yet.
+**Version 1.0.0. Tested on a Meta Quest 3 only** (see [What was tested](#what-was-tested)). Quest Pro and Quest 2 are the
+intended targets too, but nobody has run it on them yet. **Controllers only: there is no hand pinch input** (see [Hands](#hands)).
 
 It pairs with the AirFrameXR streamer. It is built around that one stream (HEVC, 10-bit) and is not meant for a stock ALVR
 server. AirFrameXR is an independent project and is not affiliated with the ALVR project.
@@ -51,17 +51,16 @@ device checklist are in [`QUEST_VULKAN_PORT.md`](QUEST_VULKAN_PORT.md); the welc
 
 - **Welcome panel** in place of the text HUD: the AirFrameXR mark, the connection status ("On the PC, click Find headset..."), and a
   floor-height adjustment (-50 to +50 cm, plus, minus and reset) with the headset's own height and the height the game will see.
-  Pointing works with a controller ray and trigger, or with a hand and a pinch. The offset is saved on the headset and applied
+  Pointing works with a controller ray and trigger. The offset is saved on the headset and applied
   when the stream starts. The panel is shown while waiting and disappears when the stream starts.
 
-**Hand tracking**
+**Hands**
 
-- **Hands as controllers for the desktop mirror, EXPERIMENTAL.** Like the AirFrameXR Vision Pro client: with free hands, the hand
-  pose is sent as that hand's controller and a **pinch is its trigger**; a **second pinch within 0.9 s of a short first one is
-  that hand's X (left) or A (right) button**, which the AirFrameXR desktop mirror reads as a double click. It uses OpenXR
-  `XR_EXT_hand_interaction` for the pose and Meta's own pinch signal (`XR_FB_hand_tracking_aim`) when the runtime reports it, else
-  the pinch strength (a pinch starts above 0.6 and ends below 0.4, measured on one Quest 3). When controllers are held nothing
-  changes: the controller path is the stock one. **Hand pinch is still experimental: see the known issues below.**
+- **No pinch input.** Hand pinch was tried (hands as controllers for the desktop mirror: hand pose, pinch as trigger, double
+  pinch as X / A) and **removed**, for the same reason as on the AirFrameXR Vision Pro client: it is not reliable. The pinch signal
+  is noisy, Meta's own pinch bit is often missing at the moment of a pinch, the hand's grip pose is far from the system's aim ray
+  and the left hand did not register reliably. **Use the controllers** to point and click, in the welcome panel, in games and in
+  the desktop mirror. The hand skeleton is still sent as the stock ALVR client does, for games that read it.
 
 ## What was tested
 
@@ -71,30 +70,18 @@ Tested by the author on **one Meta Quest 3**, with the AirFrameXR streamer on an
 - The RGB chroma key (green key colour).
 - The welcome panel.
 - Controllers, in several different games: all fine.
-- Hand tracking, early builds: a pinch clicks in the desktop mirror, imprecisely. The final thresholds below were chosen from a
-  measured capture and **have not been run on a headset**.
 
-**Not tested, so do not assume it works:** Quest Pro, Quest 2 and Quest 3S; hand pinch and the double pinch in this release; the floor-height
+**Not tested, so do not assume it works:** Quest Pro, Quest 2 and Quest 3S; the hand skeleton path after the pinch removal (a build and a compile check only); the floor-height
 offset in a game; the HSV chroma key; long sessions; wired (USB) use and the streamer's USB autolaunch; the Vulkan validation
 layers (no release build ran with them, so the absence of warnings is not proof that the raw Vulkan code is correct).
-
-**Known issues, hand pinch is experimental:**
-- The pinch signal is noisy and Meta's own pinch bit is often not reported at the moment of a pinch, so a click can stutter or
-  need a firm pinch. A closed hand used to hold a click for seconds; the new thresholds should stop that, but this is not verified.
-- The pointing beam is built from the hand's grip pose, which can be 50 to 95 degrees away from the system's own aim ray, so
-  hand pointing can be off, and **the left hand did not register reliably in testing**. A fix needs a measured offset and was
-  not done.
-- With both hands pinching, the streamer's desktop mirror can switch its beam from one hand to the other every few milliseconds
-  (that logic is in the mirror, not in this client). Its first pinch from the idle hand only takes over the beam.
-- Controllers are the reliable way to point and click for now.
 
 ## Install (sideload)
 
 The APK is signed with a debug key. Its package name is `airframexr.client`, so it installs next to a stock ALVR client. Pairing is
-stored per package: the first time, pair it from the streamer ("Find headset..."). Hand tracking must be on in the Quest's settings.
+stored per package: the first time, pair it from the streamer ("Find headset...").
 
 ```
-adb install -r airframexr-quest-0.9.0.apk
+adb install -r airframexr-quest-1.0.0.apk
 ```
 
 Then start the AirFrameXR streamer on the PC and start the app (it appears as **AirFrameXR**).
@@ -113,7 +100,7 @@ cargo xtask build-client --release            # build/alvr_client_android/alvr_c
 ```
 
 The SPIR-V of the staging shaders is committed; `alvr/graphics/resources/compile_staging_shaders.sh` regenerates it with the NDK's
-`glslc`. The app version (0.9.0, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
+`glslc`. The app version (1.0.0, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
 `alvr/client_openxr/Cargo.toml`. The ALVR protocol version the streamer checks is `alvr_common`'s, still 20.14.1.
 
 ## License
