@@ -123,6 +123,8 @@ name = "com.oculus.permission.EYE_TRACKING"
 [[package.metadata.android.uses_permission]]
 name = "com.oculus.permission.FACE_TRACKING"
 [[package.metadata.android.uses_permission]]
+name = "com.oculus.permission.HAND_TRACKING"   # Meta's store validator requires this name with the oculus.software.handtracking feature (the runtime logs it as deprecated)
+[[package.metadata.android.uses_permission]]
 name = "horizonos.permission.HAND_TRACKING"   # was com.oculus.permission.HAND_TRACKING, which the Meta runtime logs as deprecated; an install-time grant
 [[package.metadata.android.uses_permission]]
 name = "com.oculus.permission.WIFI_LOCK"
