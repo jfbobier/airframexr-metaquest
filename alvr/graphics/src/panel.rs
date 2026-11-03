@@ -387,7 +387,7 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         px: static_layer.to_vec(),
     };
 
-    // Subtitle: the info line starts with "AirFrameXR client <ALVR protocol version>"; shown as "Quest client <ours> · ALVR <protocol>"
+    // Subtitle: the info line starts with "AirFrameXR client <ALVR protocol version>"; shown as "Quest client <ours> · Vulkan · ALVR <protocol>"
     let version = state
         .info
         .lines()
@@ -396,7 +396,7 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         .unwrap_or("");
     canvas.draw_text(
         &font,
-        &format!("Quest client {CLIENT_VERSION} · ALVR {version}").replace("  ", " "),
+        &format!("Quest client {CLIENT_VERSION} · Vulkan · ALVR {version}").replace("  ", " "),
         38.0,
         MUTED,
         (266.0, 206.0),
