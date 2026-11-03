@@ -114,6 +114,10 @@ and this fork would not exist without it. AirFrameXR is an independent project a
 The base is `v20.14.1` and not upstream `master` because the AirFrameXR streamer speaks the 20.14.1 protocol, and `master`
 (21.0.0-dev) does not.
 
+## Privacy
+
+The app collects, stores and sends no personal data and makes no internet connection: see [`PRIVACY.md`](PRIVACY.md).
+
 ## License
 
 MIT, as ALVR (see `LICENSE`, which keeps the original copyright holders).
