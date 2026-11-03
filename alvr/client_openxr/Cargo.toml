@@ -1,6 +1,6 @@
 [package]
 name = "alvr_client_openxr"
-version = "1.3.0"   # AirFrameXR Quest client version: cargo-apk turns it into versionName/versionCode. The ALVR protocol version the streamer checks is alvr_common's, still 20.14.1
+version = "1.3.1"   # AirFrameXR Quest client version: cargo-apk turns it into versionName/versionCode. The ALVR protocol version the streamer checks is alvr_common's, still 20.14.1
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -132,8 +132,8 @@ value = "vr_only"
 [[package.metadata.android.application.meta_data]]
 name = "com.oculus.supportedDevices"
 # Note: value is changed for the Meta store, which requires an explicit list of platforms.
-# "all" is required to support Quest 1 which doesn't have newer platform names registered.
-value = "all"
+# Quest 3 only: the only device this client has been tested on (AirFrameXR Quest client 1.3.1).
+value = "quest3"
 [[package.metadata.android.application.meta_data]]
 name = "com.oculus.vr.focusaware"
 value = "true"
