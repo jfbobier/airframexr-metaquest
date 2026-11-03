@@ -377,8 +377,8 @@ pub(crate) fn render_static() -> Vec<u8> {
     canvas.px
 }
 
-/// The AirFrameXR Quest client version (also `version_name` in alvr/client_openxr/Cargo.toml).
-const CLIENT_VERSION: &str = "0.9.0";
+/// The AirFrameXR Quest client version (Cargo.toml has 1.3.0, the panel shows 1.3).
+const CLIENT_VERSION: &str = "1.3";
 
 /// The whole panel for `state`, over the static layer.
 pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {

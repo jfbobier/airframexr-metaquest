@@ -4,7 +4,7 @@ The Meta Quest client of [AirFrameXR](https://github.com/jfbobier/AirFrameXR): w
 game through AirFrameXR's OpenXR runtime (frame generation, foveated encoding, NVENC), streams it with the **ALVR protocol
 version 20** (20.14.1), and this app shows it on the headset, and the controllers drive the game and the desktop mirror.
 
-**Version 1.0.0. Tested on a Meta Quest 3 only** (see [What was tested](#what-was-tested)). Quest Pro and Quest 2 are the
+**Version 1.3.0. Tested on a Meta Quest 3 only** (see [What was tested](#what-was-tested)). Quest Pro and Quest 2 are the
 intended targets too, but nobody has run it on them yet. **Controllers only: there is no hand pinch input** (see [Hands](#hands)).
 
 It pairs with the AirFrameXR streamer. It is built around that one stream (HEVC, 10-bit) and is not meant for a stock ALVR
@@ -70,8 +70,9 @@ Tested by the author on **one Meta Quest 3**, with the AirFrameXR streamer on an
 - The RGB chroma key (green key colour).
 - The welcome panel.
 - Controllers, in several different games: all fine.
+- The 1.0 build (pinch removed), on the same Quest 3: runs well, the Vulkan rendering is reactive (the author's report; no measurements were taken).
 
-**Not tested, so do not assume it works:** Quest Pro, Quest 2 and Quest 3S; the hand skeleton path after the pinch removal (a build and a compile check only); the floor-height
+**Not tested, so do not assume it works:** Quest Pro, Quest 2 and Quest 3S; the floor-height
 offset in a game; the HSV chroma key; long sessions; wired (USB) use and the streamer's USB autolaunch; the Vulkan validation
 layers (no release build ran with them, so the absence of warnings is not proof that the raw Vulkan code is correct).
 
@@ -81,7 +82,7 @@ The APK is signed with a debug key. Its package name is `airframexr.client`, so 
 stored per package: the first time, pair it from the streamer ("Find headset...").
 
 ```
-adb install -r airframexr-quest-1.0.0.apk
+adb install -r airframexr-quest-1.3.0.apk
 ```
 
 Then start the AirFrameXR streamer on the PC and start the app (it appears as **AirFrameXR**).
@@ -100,7 +101,7 @@ cargo xtask build-client --release            # build/alvr_client_android/alvr_c
 ```
 
 The SPIR-V of the staging shaders is committed; `alvr/graphics/resources/compile_staging_shaders.sh` regenerates it with the NDK's
-`glslc`. The app version (1.0.0, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
+`glslc`. The app version (1.3.0, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
 `alvr/client_openxr/Cargo.toml`. The ALVR protocol version the streamer checks is `alvr_common`'s, still 20.14.1.
 
 ## License
