@@ -98,6 +98,11 @@ pub struct StreamContext {
     height_offset_m: f32,
     swapchains: [xr::Swapchain<xr::Vulkan>; 2],
     last_good_view_params: [ViewParams; 2],
+    // display-tick counters for the streamer's "headset repeated" figure (AirFrameXR docs/MEASUREMENT_FIX_LOG.md): one count per render tick, whether it
+    // had a new frame; sent as one `va_ticks` line every 10 s (the line the visionOS client sends). Integers on the render thread: no lock, no allocation per tick.
+    tick_fresh: u32,
+    tick_none: u32,
+    tick_window_start: Instant,
     input_thread: Option<JoinHandle<()>>,
     input_thread_running: Arc<RelaxedAtomic>,
     config: ParsedStreamConfig,
@@ -238,6 +243,9 @@ impl StreamContext {
             height_offset_m,
             swapchains,
             last_good_view_params: [ViewParams::default(); 2],
+            tick_fresh: 0,
+            tick_none: 0,
+            tick_window_start: Instant::now(),
             input_thread: None,
             input_thread_running,
             config,
@@ -367,6 +375,26 @@ impl StreamContext {
             } else {
                 (vsync_time, self.last_good_view_params, ptr::null_mut())
             };
+
+        if buffer_ptr.is_null() {
+            self.tick_none += 1;
+        } else {
+            self.tick_fresh += 1;
+        }
+        let window = self.tick_window_start.elapsed();
+        if window >= Duration::from_secs(10) {
+            // errors are what the client forwards to the streamer's log whatever the log level (the host reads this line and keeps it out of its error count)
+            alvr_common::error!(
+                "va_ticks {{\"v\":1,\"client\":\"quest\",\"t\":{:.2},\"ticks\":{},\"fresh\":{},\"resubmit\":0,\"reprojected\":0,\"none\":{},\"drops\":0}}",
+                window.as_secs_f32(),
+                self.tick_fresh + self.tick_none,
+                self.tick_fresh,
+                self.tick_none
+            );
+            self.tick_fresh = 0;
+            self.tick_none = 0;
+            self.tick_window_start = Instant::now();
+        }
 
         let left_swapchain_idx = self.swapchains[0].acquire_image().unwrap();
         let right_swapchain_idx = self.swapchains[1].acquire_image().unwrap();
