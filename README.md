@@ -78,7 +78,7 @@ package name is `airframexr.client`, so it installs next to a stock ALVR client.
 it from the streamer ("Find headset...").
 
 ```
-adb install -r airframexr-quest-1.3.0.apk
+adb install -r airframexr-quest-1.3.10.apk
 ```
 
 Then start the AirFrameXR streamer on the PC and start the app (it appears as **AirFrameXR**). It pairs with the AirFrameXR streamer
@@ -98,7 +98,7 @@ cargo xtask build-client --release            # build/alvr_client_android/alvr_c
 ```
 
 The SPIR-V of the staging shaders is committed; `alvr/graphics/resources/compile_staging_shaders.sh` regenerates it with the NDK's
-`glslc`. The app version (1.3.0, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
+`glslc`. The app version (1.3.10, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
 `alvr/client_openxr/Cargo.toml`. The ALVR protocol version the streamer checks is `alvr_common`'s, still 20.14.1.
 
 ## Credits
