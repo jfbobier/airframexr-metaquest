@@ -23,7 +23,7 @@ There is no Enter button: Quest connects by itself, the panel is the lobby and g
 
 ## Pointing
 
-- Controllers: the aim pose is the ray, the trigger is the click (only when the hand has no tracked skeleton, so a controller lying on a table does not point). Hands do not point: hand pinch was removed in 1.0 (not reliable).
+- Controllers: the aim pose is the ray, the trigger is the click. Hands do not point: hand tracking is not used (pinch was removed in 1.0, all hand tracking in 1.3.10).
 - A ray is drawn from the controller to the panel (cyan, white while pressed). The panel is the old HUD's four quads, 3.5 m wide at 5 m, so a ray hits it wherever the wearer looks; hit testing uses the same geometry (`panel_hit`).
 
 ## Not verified, check on the headset

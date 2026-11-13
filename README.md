@@ -29,7 +29,7 @@ many streamers and many headsets. This one is built for exactly one pairing, and
   YCbCr sampler, in place of the old EGL image path. The old client was the reference, ported function by function; the deviations
   are in [`QUEST_VULKAN_PORT.md`](QUEST_VULKAN_PORT.md). On a Quest 3 it is reactive (the author's report).
 - **Modern Meta platform.** OpenXR with the current Meta extensions, Android 14 target (SDK 34) and the current Horizon OS manifest
-  (`horizonos.permission.HAND_TRACKING` in place of the deprecated name). Quest only: the Pico, YVR, Lynx, HTC and ByteDance
+  (no hand, eye, face or body tracking permissions or features: only head and controllers are used). Quest only: the Pico, YVR, Lynx, HTC and ByteDance
   code, loaders and workarounds were removed, about 1,500 lines. The APK is **3.5 MB** (it was 26.6 MB).
 - **Colour from what the stream declares.** The AirFrameXR chain is HEVC Main10, BT.709, full range, SDR. The Quest's driver
   suggests *narrow* range for that stream, so the YCbCr conversion is created as BT.709 full range and the old shader remap is gone.
@@ -38,8 +38,9 @@ many streamers and many headsets. This one is built for exactly one pairing, and
   per-eye field of view of the Quest and renders the stream with the field of view the streamer declares, so the picture stays
   geometrically correct under those settings. The restriction itself is decided by the streamer (see its README); this client has no
   field-of-view logic of its own yet.
-- **Controllers, no pinch.** Hand pinch was tried and removed in 1.0 because it was not reliable (same decision as on the AirFrameXR
-  Vision Pro client). Controllers drive the panel, the games and the desktop mirror; free hands send only the skeleton.
+- **Controllers only.** Hand pinch was tried and removed in 1.0 because it was not reliable (same decision as on the AirFrameXR
+  Vision Pro client), and in 1.3.10 all hand, eye, face and body tracking code and permissions were removed: AirFrameXR's foveation
+  encodes the centre of the picture and does not use gaze. Controllers drive the panel, the games and the desktop mirror.
 - **Chroma-key fix.** The HSV key tested the wrong mode number in the shader (the bug is also in stock ALVR 20.14.1).
 
 Performance is the design goal, not a published result: there is no benchmark of this client against the old OpenGL one yet, and the

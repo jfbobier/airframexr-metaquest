@@ -96,36 +96,13 @@ actions = ["android.intent.action.MAIN"]
 categories = [
     "android.intent.category.LAUNCHER",
     "com.oculus.intent.category.VR",
-    "com.yvr.intent.category.VR",
     "org.khronos.openxr.intent.category.IMMERSIVE_HMD",
 ]
 
 # Quest entries
 [[package.metadata.android.uses_feature]]
-name = "oculus.software.eye_tracking"
-required = false
-[[package.metadata.android.uses_feature]]
-name = "oculus.software.face_tracking"
-required = false
-[[package.metadata.android.uses_feature]]
-name = "oculus.software.handtracking"
-required = false
-[[package.metadata.android.uses_feature]]
 name = "com.oculus.feature.PASSTHROUGH"
 required = false
-[[package.metadata.android.uses_feature]]
-name = "com.oculus.software.body_tracking"
-required = false
-[[package.metadata.android.uses_permission]]
-name = "com.oculus.permission.BODY_TRACKING"
-[[package.metadata.android.uses_permission]]
-name = "com.oculus.permission.EYE_TRACKING"
-[[package.metadata.android.uses_permission]]
-name = "com.oculus.permission.FACE_TRACKING"
-[[package.metadata.android.uses_permission]]
-name = "com.oculus.permission.HAND_TRACKING"   # Meta's store validator requires this name with the oculus.software.handtracking feature (the runtime logs it as deprecated)
-[[package.metadata.android.uses_permission]]
-name = "horizonos.permission.HAND_TRACKING"   # was com.oculus.permission.HAND_TRACKING, which the Meta runtime logs as deprecated; an install-time grant
 [[package.metadata.android.uses_permission]]
 name = "com.oculus.permission.WIFI_LOCK"
 [[package.metadata.android.application.meta_data]]
@@ -139,73 +116,3 @@ value = "quest3"
 [[package.metadata.android.application.meta_data]]
 name = "com.oculus.vr.focusaware"
 value = "true"
-[[package.metadata.android.application.meta_data]]
-name = "com.oculus.handtracking.frequency"
-value = "HIGH"
-[[package.metadata.android.application.meta_data]]
-name = "com.oculus.handtracking.version"
-value = "V2.0"
-
-# Vive entries
-[[package.metadata.android.uses_feature]]
-name = "wave.feature.eyetracking"
-required = false
-[[package.metadata.android.uses_feature]]
-name = "wave.feature.handtracking"
-required = true
-[[package.metadata.android.uses_feature]]
-name = "wave.feature.lipexpression"
-required = false
-[[package.metadata.android.application.meta_data]]
-name = "minWaveSDKVersion"
-value = "1"
-[[package.metadata.android.application.meta_data]]
-name = "com.htc.vr.content.NumController"
-value = "1,2"
-[[package.metadata.android.application.meta_data]]
-name = "com.htc.vr.content.NumDoFController"
-value = "3,6DoF"
-[[package.metadata.android.application.meta_data]]
-name = "com.htc.vr.content.NumDoFHmd"
-value = "3,6DoF"
-
-# Pico entries
-[[package.metadata.android.uses_permission]]
-name = "com.picovr.permission.EYE_TRACKING"
-[[package.metadata.android.uses_permission]]
-name = "com.picovr.permission.FACE_TRACKING"
-[[package.metadata.android.application.meta_data]]
-name = "eyetracking_calibration"
-value = "true"
-[[package.metadata.android.application.meta_data]]
-name = "handtracking"
-value = "1"
-[[package.metadata.android.application.meta_data]]
-name = "picovr.software.eye_tracking"
-value = "1"
-[[package.metadata.android.application.meta_data]]
-name = "picovr.software.face_tracking"
-value = "true"
-[[package.metadata.android.application.meta_data]]
-name = "pvr.app.type"
-value = "vr"
-[[package.metadata.android.application.meta_data]]
-name = "pvr.display.orientation"
-value = "180"
-[[package.metadata.android.application.meta_data]]
-name = "pvr.sdk.version"
-value = "OpenXR"
-[[package.metadata.android.application.meta_data]]
-name = "pxr.sdk.version_code"
-value = "5900"
-
-# Yvr entries
-[[package.metadata.android.application.meta_data]]
-name = "com.yvr.intent.category.VR"
-value = "vr_only"
-
-# Lynx entries
-[[package.metadata.android.queries.package]]
-name = "com.ultraleap.tracking.service"
-[[package.metadata.android.queries.package]]
-name = "com.ultraleap.openxr.api_layer"

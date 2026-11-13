@@ -8,7 +8,6 @@ mod stream;
 
 use crate::stream::ParsedStreamConfig;
 use alvr_client_core::{ClientCapabilities, ClientCoreContext, ClientCoreEvent};
-use alvr_common::settings_schema::Switch;
 use alvr_common::{
     error,
     glam::{Quat, UVec2, Vec3},
@@ -17,13 +16,8 @@ use alvr_common::{
     Fov, Pose, HAND_LEFT_ID,
 };
 use alvr_graphics::GraphicsContext;
-use alvr_session::BodyTrackingSourcesConfig;
 use alvr_system_info::Platform;
-use extra_extensions::{
-    META_BODY_TRACKING_FULL_BODY_EXTENSION_NAME, META_DETACHED_CONTROLLERS_EXTENSION_NAME,
-    META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME,
-};
-use interaction::{InteractionContext, InteractionSourcesConfig};
+use interaction::InteractionContext;
 use lobby::Lobby;
 use openxr as xr;
 use passthrough::PassthroughLayer;
@@ -148,16 +142,10 @@ pub fn entry_point() {
     assert!(available_extensions.khr_vulkan_enable2);
 
     let mut exts = xr::ExtensionSet::default();
-    exts.ext_hand_interaction = available_extensions.ext_hand_interaction;
-    exts.ext_hand_tracking = available_extensions.ext_hand_tracking;
-    exts.fb_hand_tracking_aim = available_extensions.fb_hand_tracking_aim;
     exts.ext_local_floor = available_extensions.ext_local_floor;
-    exts.fb_body_tracking = available_extensions.fb_body_tracking;
     exts.fb_color_space = available_extensions.fb_color_space;
     exts.fb_composition_layer_settings = available_extensions.fb_composition_layer_settings;
     exts.fb_display_refresh_rate = available_extensions.fb_display_refresh_rate;
-    exts.fb_eye_tracking_social = available_extensions.fb_eye_tracking_social;
-    exts.fb_face_tracking2 = available_extensions.fb_face_tracking2;
     exts.fb_foveation = available_extensions.fb_foveation;
     exts.fb_foveation_configuration = available_extensions.fb_foveation_configuration;
     exts.fb_passthrough = available_extensions.fb_passthrough;
@@ -168,18 +156,6 @@ pub fn entry_point() {
     }
     exts.khr_convert_timespec_time = true;
     exts.khr_vulkan_enable2 = true;
-    exts.other = available_extensions
-        .other
-        .into_iter()
-        .filter(|ext| {
-            [
-                META_BODY_TRACKING_FULL_BODY_EXTENSION_NAME,
-                META_SIMULTANEOUS_HANDS_AND_CONTROLLERS_EXTENSION_NAME,
-                META_DETACHED_CONTROLLERS_EXTENSION_NAME,
-            ]
-            .contains(&ext.as_str())
-        })
-        .collect();
 
     let available_layers = xr_entry.enumerate_layers().unwrap();
     alvr_common::info!("OpenXR available layers: {available_layers:#?}");
@@ -272,8 +248,6 @@ pub fn entry_point() {
 
         let interaction_context = Arc::new(RwLock::new(InteractionContext::new(
             xr_session.clone(),
-            exts.other.clone(),
-            xr_system,
             platform,
         )));
 
@@ -284,19 +258,6 @@ pub fn entry_point() {
             default_view_resolution,
             &last_lobby_message,
         );
-        let lobby_body_tracking_config = BodyTrackingSourcesConfig {
-            body_tracking_fb: Switch::Disabled,
-            body_tracking_bd: Switch::Disabled,
-        };
-        let lobby_interaction_sources = InteractionSourcesConfig {
-            face_tracking: None,
-            body_tracking: Some(lobby_body_tracking_config),
-            prefers_multimodal_input: true,
-        };
-        interaction_context
-            .write()
-            .select_sources(&lobby_interaction_sources);
-
         let mut session_running = false;
         let mut stream_context = None::<StreamContext>;
         let mut passthrough_layer = None;
@@ -396,10 +357,6 @@ pub fn entry_point() {
                         if passthrough_layer.is_none() {
                             passthrough_layer = PassthroughLayer::new(&xr_session).ok();
                         }
-
-                        interaction_context
-                            .write()
-                            .select_sources(&lobby_interaction_sources);
 
                         stream_context = None;
                     }

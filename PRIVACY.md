@@ -17,9 +17,9 @@ analytics of its own.
 | Data | What happens | Where it goes |
 |---|---|---|
 | Video and audio of your game | Received from your PC, decoded and shown; nothing is recorded or kept | Comes from your PC; stays in the headset's memory only while playing |
-| Head, controller and hand positions, button presses | Read from the headset and sent to your PC so the game can react | Only to the PC you paired with, over your local network |
+| Head and controller positions, button presses | Read from the headset and sent to your PC so the game can react | Only to the PC you paired with, over your local network |
 | Microphone | Sent to your PC **only if you turn on microphone streaming in the streamer's settings** | Only to your PC |
-| Eye, face and body tracking | Read **only if you enable them in the streamer's settings and grant the permission on the headset** | Only to your PC |
+| Hand, eye, face and body tracking | **Not used.** The app does not request these permissions and never reads this data | Nowhere |
 | Headset name, IP address | Shown on the welcome panel; the app announces itself on your local network so your PC can find it | Local network only |
 
 The app makes no connection to the internet. It contains no analytics, advertising, tracking or crash-reporting code, and it
@@ -35,8 +35,7 @@ deletes it.**
 
 - **Network, Wi-Fi state, Wi-Fi lock, wake lock:** to connect to your PC and keep the connection steady while you play.
 - **Microphone:** to send your voice to the PC if you enable it in the streamer.
-- **Hand, eye, face and body tracking:** to send tracking data to the PC if you enable it in the streamer. Without that, these are
-  not read.
+- **No hand, eye, face or body tracking permissions.** The app does not ask for them.
 - **OpenXR:** to display VR content through the Quest's runtime.
 
 ## Your PC

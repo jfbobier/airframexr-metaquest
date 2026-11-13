@@ -1,17 +1,6 @@
-mod body_tracking_fb;
-mod eye_tracking_social;
-mod face_tracking2_fb;
-mod multimodal_input;
 mod passthrough_fb;
 
-pub use body_tracking_fb::*;
-pub use eye_tracking_social::*;
-pub use face_tracking2_fb::*;
-pub use multimodal_input::*;
 pub use passthrough_fb::*;
-use std::ffi::CString;
-use std::mem;
-
 use openxr::{self as xr, sys};
 
 fn xr_res(result: sys::Result) -> xr::Result<()> {
@@ -19,42 +8,5 @@ fn xr_res(result: sys::Result) -> xr::Result<()> {
         Ok(())
     } else {
         Err(result)
-    }
-}
-
-fn get_props<G, T>(
-    session: &xr::Session<G>,
-    system: xr::SystemId,
-    default_struct: T,
-) -> xr::Result<T> {
-    let instance = session.instance();
-
-    let mut props = default_struct;
-    let mut system_properties = sys::SystemProperties::out((&raw mut props).cast());
-    let result = unsafe {
-        (instance.fp().get_system_properties)(
-            instance.as_raw(),
-            system,
-            system_properties.as_mut_ptr(),
-        )
-    };
-
-    xr_res(result).map(|_| props)
-}
-
-fn get_instance_proc<G, FnTy>(session: &xr::Session<G>, method_name: &str) -> xr::Result<FnTy> {
-    unsafe {
-        let method_name = CString::new(method_name).unwrap();
-        let mut function_handle = None;
-
-        xr_res((session.instance().fp().get_instance_proc_addr)(
-            session.instance().as_raw(),
-            method_name.as_ptr(),
-            &mut function_handle,
-        ))?;
-
-        function_handle
-            .map(|pfn| mem::transmute_copy(&pfn))
-            .ok_or(sys::Result::ERROR_EXTENSION_NOT_PRESENT)
     }
 }

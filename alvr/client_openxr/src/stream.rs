@@ -1,6 +1,6 @@
 use crate::{
     graphics::{self, ProjectionLayerAlphaConfig, ProjectionLayerBuilder},
-    interaction::{self, InteractionContext, InteractionSourcesConfig},
+    interaction::{self, InteractionContext},
 };
 use alvr_client_core::{
     video_decoder::{self, VideoDecoderConfig, VideoDecoderSource},
@@ -48,7 +48,6 @@ pub struct ParsedStreamConfig {
     pub max_buffering_frames: f32,
     pub buffering_history_weight: f32,
     pub decoder_options: Vec<(String, MediacodecProperty)>,
-    pub interaction_sources: InteractionSourcesConfig,
 }
 
 impl ParsedStreamConfig {
@@ -82,7 +81,6 @@ impl ParsedStreamConfig {
             max_buffering_frames: config.settings.video.max_buffering_frames,
             buffering_history_weight: config.settings.video.buffering_history_weight,
             decoder_options: config.settings.video.mediacodec_extra_options.clone(),
-            interaction_sources: InteractionSourcesConfig::new(config),
         }
     }
 }
@@ -119,10 +117,6 @@ impl StreamContext {
         interaction_ctx: Arc<RwLock<InteractionContext>>,
         config: ParsedStreamConfig,
     ) -> StreamContext {
-        interaction_ctx
-            .write()
-            .select_sources(&config.interaction_sources);
-
         let xr_exts = xr_session.instance().exts();
 
         if xr_exts.fb_display_refresh_rate.is_some() {
@@ -522,7 +516,6 @@ fn stream_input_loop(
     running: Arc<RelaxedAtomic>,
 ) {
     let mut last_controller_poses = [Pose::default(); 2];
-    let mut last_palm_poses = [Pose::default(); 2];
     let mut last_view_params = [ViewParams::default(); 2];
 
     let mut deadline = Instant::now();
@@ -561,61 +554,24 @@ fn stream_input_loop(
 
         device_motions.push((*HEAD_ID, head_motion));
 
-        let (left_hand_motion, left_hand_skeleton) = crate::interaction::get_hand_data(
-            &xr_session,
-            stage_reference_space,
-            now,
-            &int_ctx.hands_interaction[0],
-            &mut last_controller_poses[0],
-            &mut last_palm_poses[0],
-        );
-        let (right_hand_motion, right_hand_skeleton) = crate::interaction::get_hand_data(
-            &xr_session,
-            stage_reference_space,
-            now,
-            &int_ctx.hands_interaction[1],
-            &mut last_controller_poses[1],
-            &mut last_palm_poses[1],
-        );
-
-        // Note: When multimodal input is enabled, we are sure that when free hands are used
-        // (not holding controllers) the controller data is None.
-        if int_ctx.multimodal_hands_enabled || left_hand_skeleton.is_none() {
-            if let Some(motion) = left_hand_motion {
-                device_motions.push((*HAND_LEFT_ID, motion));
-            }
-        }
-        if int_ctx.multimodal_hands_enabled || right_hand_skeleton.is_none() {
-            if let Some(motion) = right_hand_motion {
-                device_motions.push((*HAND_RIGHT_ID, motion));
-            }
-        }
-
-        let face_data = FaceData {
-            eye_gazes: interaction::get_eye_gazes(
-                &int_ctx.face_sources,
+        // Controllers only: no hand skeleton, eye, face or body data is read or sent
+        for (id, hand_idx) in [(*HAND_LEFT_ID, 0), (*HAND_RIGHT_ID, 1)] {
+            if let Some(motion) = crate::interaction::get_controller_motion(
+                &xr_session,
                 stage_reference_space,
                 now,
-            ),
-            fb_face_expression: interaction::get_fb_face_expression(&int_ctx.face_sources, now),
-            htc_eye_expression: None,
-            htc_lip_expression: None,
-        };
-
-        if let Some((tracker, joint_count)) = &int_ctx.body_sources.body_tracker_fb {
-            device_motions.append(&mut interaction::get_fb_body_tracking_points(
-                stage_reference_space,
-                now,
-                tracker,
-                *joint_count,
-            ));
+                &int_ctx.hands_interaction[hand_idx],
+                &mut last_controller_poses[hand_idx],
+            ) {
+                device_motions.push((id, motion));
+            }
         }
 
         core_ctx.send_tracking(
             Duration::from_nanos(now.as_nanos() as u64),
             device_motions,
-            [left_hand_skeleton, right_hand_skeleton],
-            face_data,
+            [None, None],
+            FaceData::default(),
         );
 
         let button_entries = interaction::update_buttons(&xr_session, &int_ctx.button_actions);

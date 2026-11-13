@@ -9,7 +9,7 @@ use alvr_common::{
     Pose, LEFT_TRIGGER_VALUE_ID, RIGHT_TRIGGER_VALUE_ID,
 };
 use alvr_graphics::{
-    panel_hit, BodyTrackingType, GraphicsContext, LobbyPointer, LobbyRenderer, LobbyViewParams,
+    panel_hit, GraphicsContext, LobbyPointer, LobbyRenderer, LobbyViewParams,
     PanelButton, PanelState, SDR_FORMAT_VK,
 };
 use openxr as xr;
@@ -175,11 +175,7 @@ impl Lobby {
     }
 
     // Pointing rays of the controllers (aim pose, trigger), each with the panel button it lands on.
-    fn pointers(
-        &mut self,
-        vsync_time: Duration,
-        hand_data: &[(Option<alvr_common::DeviceMotion>, Option<[Pose; 26]>); 2],
-    ) -> Vec<Pointer> {
+    fn pointers(&mut self, vsync_time: Duration) -> Vec<Pointer> {
         let mut pointers = vec![];
 
         for hand_idx in 0..2 {
@@ -192,8 +188,7 @@ impl Lobby {
             );
             let trigger = self.trigger_pressed(hand_idx);
             self.trigger_down[hand_idx] = trigger;
-            // A controller that is not held (multimodal) still has a pose: only a held one points
-            if let (Some(pose), true) = (aim_pose, hand_data[hand_idx].1.is_none()) {
+            if let Some(pose) = aim_pose {
                 let dir = pose.orientation * -Vec3::Z;
                 if let Some(hit) = panel_hit(pose.position, dir) {
                     pointers.push(Pointer {
@@ -231,44 +226,10 @@ impl Lobby {
             .sync_actions(&[(&self.interaction_ctx.read().action_set).into()])
             .ok();
 
-        let left_hand_data = interaction::get_hand_data(
-            &self.xr_session,
-            &self.reference_space,
-            vsync_time,
-            &self.interaction_ctx.read().hands_interaction[0],
-            &mut Pose::default(),
-            &mut Pose::default(),
-        );
-        let right_hand_data = interaction::get_hand_data(
-            &self.xr_session,
-            &self.reference_space,
-            vsync_time,
-            &self.interaction_ctx.read().hands_interaction[1],
-            &mut Pose::default(),
-            &mut Pose::default(),
-        );
-
+        // Controllers only: the lobby draws no hand skeleton and no body
+        let hand_data: [(Option<alvr_common::DeviceMotion>, Option<[Pose; 26]>); 2] =
+            [(None, None), (None, None)];
         let additional_motions: Option<Vec<alvr_common::DeviceMotion>> = None;
-
-        let body_skeleton_fb = self
-            .interaction_ctx
-            .read()
-            .body_sources
-            .body_tracker_fb
-            .as_ref()
-            .and_then(|(tracker, joint_count)| {
-                interaction::get_fb_body_skeleton(
-                    &self.reference_space,
-                    xr_vsync_time,
-                    tracker,
-                    *joint_count,
-                )
-            });
-
-        let (body_skeleton, body_tracking_type) = match body_skeleton_fb {
-            Some(skeleton) => (Some(skeleton), Some(BodyTrackingType::Meta)),
-            None => (None, None),
-        };
 
         // Welcome panel: pointing, clicking, the height offset
         let head = Pose {
@@ -277,7 +238,7 @@ impl Lobby {
                 / 2.0,
             orientation: crate::from_xr_pose(views[0].pose).orientation,
         };
-        let pointers = self.pointers(vsync_time, &[left_hand_data.clone(), right_hand_data.clone()]);
+        let pointers = self.pointers(vsync_time);
 
         // The pointer that presses a button wins, then the first one on the panel
         let chosen = pointers
@@ -361,10 +322,10 @@ impl Lobby {
                     swapchain_index: right_swapchain_idx,
                 },
             ],
-            [left_hand_data, right_hand_data],
+            hand_data,
             additional_motions,
-            body_skeleton,
-            body_tracking_type,
+            None,
+            None,
             &lobby_pointers,
             false,
             cfg!(debug_assertions),
