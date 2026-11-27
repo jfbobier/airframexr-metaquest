@@ -19,7 +19,7 @@ use alvr_packets::{
     ServerControlPacket, StreamConfigPacket, Tracking, VideoPacketHeader,
     VideoStreamingCapabilities, AUDIO, HAPTICS, STATISTICS, TRACKING, VIDEO,
 };
-use alvr_session::{settings_schema::Switch, SocketProtocol};
+use alvr_session::{settings_schema::Switch, BitrateMode, SocketProtocol};
 use alvr_sockets::{
     ControlSocketSender, PeerType, ProtoControlSocket, StreamSender, StreamSocketBuilder,
     KEEPALIVE_INTERVAL, KEEPALIVE_TIMEOUT,
@@ -261,6 +261,13 @@ fn connection_pipeline(
 
     let settings = stream_config.settings;
     let negotiated_config = stream_config.negotiated_config;
+
+    // What the streamer asks for, to compare with what arrives (welcome panel)
+    crate::set_last_requested_mbps(match &settings.video.bitrate.mode {
+        BitrateMode::ConstantMbps(mbps) => Some(*mbps as u32),
+        // Adaptive: no fixed request
+        BitrateMode::Adaptive { .. } => None,
+    });
 
     *ctx.velocities_multiplier.write() = settings.extra.velocities_multiplier;
     *ctx.max_prediction.write() = Duration::from_millis(settings.headset.max_prediction_ms);

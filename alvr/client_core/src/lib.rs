@@ -85,6 +85,19 @@ pub(crate) fn set_last_bandwidth_mbps(mbps: u32) {
     config.store();
 }
 
+/// The constant bitrate the streamer asked for in the last stream, in Mbps (None: adaptive).
+pub fn last_requested_mbps() -> Option<u32> {
+    Config::load().last_requested_mbps
+}
+
+pub(crate) fn set_last_requested_mbps(mbps: Option<u32>) {
+    let mut config = Config::load();
+    if config.last_requested_mbps != mbps {
+        config.last_requested_mbps = mbps;
+        config.store();
+    }
+}
+
 pub enum ClientCoreEvent {
     UpdateHudMessage(String),
     StreamingStarted(Box<StreamConfig>),

@@ -86,6 +86,7 @@ impl Lobby {
             offset_cm: alvr_client_core::height_offset_cm(),
             last_session: alvr_client_core::last_session().map(|s| (s.width, s.height, s.hz)),
             last_bandwidth_mbps: alvr_client_core::last_bandwidth_mbps(),
+            requested_mbps: alvr_client_core::last_requested_mbps(),
             ..Default::default()
         };
         panel_state.set_hud_message(initial_hud_message);
@@ -302,6 +303,7 @@ impl Lobby {
             self.last_wifi_read = Some(now);
             // The stream's bandwidth is saved as its video thread ends, maybe after the stop event
             self.panel_state.last_bandwidth_mbps = alvr_client_core::last_bandwidth_mbps();
+            self.panel_state.requested_mbps = alvr_client_core::last_requested_mbps();
             self.panel_state.wifi = alvr_system_info::wifi_link().map(|w| {
                 (
                     w.frequency_mhz as u32,

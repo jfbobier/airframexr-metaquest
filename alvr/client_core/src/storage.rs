@@ -33,6 +33,10 @@ pub struct Config {
     /// Average video bandwidth really received during the last stream (Mbps)
     #[serde(default)]
     pub last_bandwidth_mbps: Option<u32>,
+
+    /// Constant bitrate the streamer asked for in the last stream (Mbps); None = adaptive
+    #[serde(default)]
+    pub last_requested_mbps: Option<u32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,6 +62,7 @@ impl Default for Config {
             height_offset_cm: 0,
             last_session: None,
             last_bandwidth_mbps: None,
+            last_requested_mbps: None,
         }
     }
 }

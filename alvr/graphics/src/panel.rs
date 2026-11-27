@@ -35,6 +35,8 @@ const CYAN: Rgba = [0, 230, 245, 255];
 const WHITE: Rgba = [244, 250, 255, 255];
 const MUTED: Rgba = [157, 180, 203, 255];
 const AMBER: Rgba = [255, 184, 64, 255];
+const GREEN: Rgba = [64, 220, 120, 255];
+const RED: Rgba = [255, 90, 90, 255];
 const BUTTON: Rgba = [18, 52, 92, 255];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -81,6 +83,8 @@ pub struct PanelState {
     pub last_session: Option<(u32, u32, u32)>,
     /// Average video bandwidth really received during the last stream, Mbps
     pub last_bandwidth_mbps: Option<u32>,
+    /// Constant bitrate the streamer asked for in that stream (None: adaptive)
+    pub requested_mbps: Option<u32>,
     /// Wi-Fi link: frequency (MHz), signal (dBm), link speed (Mbps)
     pub wifi: Option<(u32, i32, u32)>,
     pub hovered: Option<PanelButton>,
@@ -308,6 +312,9 @@ impl Canvas {
     }
 }
 
+/// Share of the requested bitrate the last stream must have carried to show green
+const BANDWIDTH_OK: f32 = 0.85;
+
 /// Signal word and colour for a Wi-Fi level in dBm (the usual Android thresholds)
 fn wifi_quality(dbm: i32) -> (&'static str, Rgba) {
     match dbm {
@@ -488,7 +495,21 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         None => value(&mut canvas, "none yet", MUTED, 490.0),
     }
     match state.last_bandwidth_mbps {
-        Some(mbps) => value(&mut canvas, &format!("{mbps} Mbps average"), WHITE, 550.0),
+        Some(mbps) => match state.requested_mbps {
+            // Green when the stream carried at least 85 % of the request, red below: the network
+            // dropped it, or the picture was too still to need it
+            Some(asked) => value(
+                &mut canvas,
+                &format!("{mbps} of {asked} Mbps asked"),
+                if mbps as f32 >= asked as f32 * BANDWIDTH_OK {
+                    GREEN
+                } else {
+                    RED
+                },
+                550.0,
+            ),
+            None => value(&mut canvas, &format!("{mbps} Mbps average"), WHITE, 550.0),
+        },
         None => value(&mut canvas, "none yet", MUTED, 550.0),
     }
     match state.wifi {
@@ -548,6 +569,7 @@ mod tests {
             offset_cm: 5,
             last_session: Some((3648, 3200, 90)),
             last_bandwidth_mbps: Some(412),
+            requested_mbps: Some(450),
             wifi: Some((5805, -52, 1201)),
             hovered: Some(PanelButton::Plus),
             ..Default::default()
