@@ -46,15 +46,18 @@ pub const HEIGHT_OFFSET_RANGE_CM: std::ops::RangeInclusive<i32> = -50..=50;
 
 /// The user's floor height offset in centimetres, stored on the headset (`Config::height_offset_cm`).
 pub fn height_offset_cm() -> i32 {
-    Config::load()
-        .height_offset_cm
-        .clamp(*HEIGHT_OFFSET_RANGE_CM.start(), *HEIGHT_OFFSET_RANGE_CM.end())
+    Config::load().height_offset_cm.clamp(
+        *HEIGHT_OFFSET_RANGE_CM.start(),
+        *HEIGHT_OFFSET_RANGE_CM.end(),
+    )
 }
 
 pub fn set_height_offset_cm(offset_cm: i32) {
     let mut config = Config::load();
-    config.height_offset_cm =
-        offset_cm.clamp(*HEIGHT_OFFSET_RANGE_CM.start(), *HEIGHT_OFFSET_RANGE_CM.end());
+    config.height_offset_cm = offset_cm.clamp(
+        *HEIGHT_OFFSET_RANGE_CM.start(),
+        *HEIGHT_OFFSET_RANGE_CM.end(),
+    );
     config.store();
 }
 
@@ -69,6 +72,17 @@ pub fn set_last_session(session: LastSession) {
         config.last_session = Some(session);
         config.store();
     }
+}
+
+/// Average video bandwidth received during the last stream, in Mbps.
+pub fn last_bandwidth_mbps() -> Option<u32> {
+    Config::load().last_bandwidth_mbps
+}
+
+pub(crate) fn set_last_bandwidth_mbps(mbps: u32) {
+    let mut config = Config::load();
+    config.last_bandwidth_mbps = Some(mbps);
+    config.store();
 }
 
 pub enum ClientCoreEvent {

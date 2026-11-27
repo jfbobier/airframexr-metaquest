@@ -82,6 +82,35 @@ pub struct ConnectionContext {
     pub max_prediction: RwLock<Duration>,
 }
 
+/// Counts the video payload received by a stream; when dropped (the stream ended) it saves the
+/// average in Mbps for the welcome panel. Streams under 10 s are not saved: too short to mean much.
+struct BandwidthMeter {
+    start: std::time::Instant,
+    bytes: u64,
+}
+
+impl BandwidthMeter {
+    fn new() -> Self {
+        Self {
+            start: std::time::Instant::now(),
+            bytes: 0,
+        }
+    }
+
+    fn add(&mut self, len: usize) {
+        self.bytes += len as u64;
+    }
+}
+
+impl Drop for BandwidthMeter {
+    fn drop(&mut self) {
+        let secs = self.start.elapsed().as_secs_f64();
+        if secs >= 10.0 && self.bytes > 0 {
+            crate::set_last_bandwidth_mbps((self.bytes as f64 * 8.0 / secs / 1e6).round() as u32);
+        }
+    }
+}
+
 // The welcome panel (client_openxr lobby) splits this message at the first blank line: the lines
 // before it (client version, hostname, IP) are the panel's small print, the rest is the status.
 fn set_hud_message(event_queue: &Mutex<VecDeque<ClientCoreEvent>>, message: &str) {
@@ -318,6 +347,7 @@ fn connection_pipeline(
         let ctx = Arc::clone(&ctx);
         move || {
             let mut stream_corrupted = true;
+            let mut bandwidth = BandwidthMeter::new();
             while is_streaming(&ctx) {
                 let data = match video_receiver.recv(STREAMING_RECV_TIMEOUT) {
                     Ok(data) => data,
@@ -327,6 +357,7 @@ fn connection_pipeline(
                 let Ok((header, nal)) = data.get() else {
                     return;
                 };
+                bandwidth.add(nal.len());
 
                 if let Some(stats) = &mut *ctx.statistics_manager.lock() {
                     stats.report_video_packet_received(header.timestamp);

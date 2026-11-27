@@ -9,8 +9,8 @@ use alvr_common::{
     Pose, LEFT_TRIGGER_VALUE_ID, RIGHT_TRIGGER_VALUE_ID,
 };
 use alvr_graphics::{
-    panel_hit, GraphicsContext, LobbyPointer, LobbyRenderer, LobbyViewParams,
-    PanelButton, PanelState, SDR_FORMAT_VK,
+    panel_hit, GraphicsContext, LobbyPointer, LobbyRenderer, LobbyViewParams, PanelButton,
+    PanelState, SDR_FORMAT_VK,
 };
 use openxr as xr;
 use std::{
@@ -27,6 +27,8 @@ const REPEAT_DELAY: Duration = Duration::from_millis(450);
 const REPEAT_INTERVAL: Duration = Duration::from_millis(70);
 // The headset height readout is redrawn at most this often
 const HEIGHT_READOUT_INTERVAL: Duration = Duration::from_millis(250);
+// The Wi-Fi reading (a few JNI calls) is refreshed this often
+const WIFI_INTERVAL: Duration = Duration::from_secs(2);
 
 struct Pointer {
     origin: Vec3,
@@ -53,6 +55,7 @@ pub struct Lobby {
     press_start: Instant,
     last_repeat: Instant,
     last_height_readout: Option<Instant>,
+    last_wifi_read: Option<Instant>,
     trigger_down: [bool; 2],
 }
 
@@ -82,6 +85,7 @@ impl Lobby {
         let mut panel_state = PanelState {
             offset_cm: alvr_client_core::height_offset_cm(),
             last_session: alvr_client_core::last_session().map(|s| (s.width, s.height, s.hz)),
+            last_bandwidth_mbps: alvr_client_core::last_bandwidth_mbps(),
             ..Default::default()
         };
         panel_state.set_hud_message(initial_hud_message);
@@ -121,6 +125,7 @@ impl Lobby {
             press_start: Instant::now(),
             last_repeat: Instant::now(),
             last_height_readout: None,
+            last_wifi_read: None,
             trigger_down: [false; 2],
         }
     }
@@ -133,6 +138,7 @@ impl Lobby {
     pub fn refresh_last_session(&mut self) {
         self.panel_state.last_session =
             alvr_client_core::last_session().map(|s| (s.width, s.height, s.hz));
+        self.panel_state.last_bandwidth_mbps = alvr_client_core::last_bandwidth_mbps();
     }
 
     pub fn update_hud_message(&mut self, message: &str) {
@@ -280,13 +286,29 @@ impl Lobby {
             self.offset_unsaved = false;
         }
 
-        if flags.contains(xr::ViewStateFlags::POSITION_VALID | xr::ViewStateFlags::ORIENTATION_VALID)
+        if flags
+            .contains(xr::ViewStateFlags::POSITION_VALID | xr::ViewStateFlags::ORIENTATION_VALID)
             && self
                 .last_height_readout
                 .is_none_or(|t| now.duration_since(t) > HEIGHT_READOUT_INTERVAL)
         {
             self.last_height_readout = Some(now);
             self.panel_state.headset_height_cm = Some((head.position.y * 100.0).round() as i32);
+        }
+        if self
+            .last_wifi_read
+            .is_none_or(|t| now.duration_since(t) > WIFI_INTERVAL)
+        {
+            self.last_wifi_read = Some(now);
+            // The stream's bandwidth is saved as its video thread ends, maybe after the stop event
+            self.panel_state.last_bandwidth_mbps = alvr_client_core::last_bandwidth_mbps();
+            self.panel_state.wifi = alvr_system_info::wifi_link().map(|w| {
+                (
+                    w.frequency_mhz as u32,
+                    w.rssi_dbm,
+                    w.link_mbps.max(0) as u32,
+                )
+            });
         }
         self.panel_state.hovered = chosen.and_then(|p| p.button);
         self.panel_state.pressed = pressed_button;

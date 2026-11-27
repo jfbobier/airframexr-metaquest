@@ -4,6 +4,20 @@ pub mod android;
 #[cfg(target_os = "android")]
 pub use android::*;
 
+/// Wi-Fi link of the headset (Android only, always None elsewhere).
+#[cfg(not(target_os = "android"))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct WifiLink {
+    pub rssi_dbm: i32,
+    pub frequency_mhz: i32,
+    pub link_mbps: i32,
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn wifi_link() -> Option<WifiLink> {
+    None
+}
+
 use alvr_common::settings_schema::SettingsSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};

@@ -29,6 +29,10 @@ pub struct Config {
     /// Per-eye resolution and refresh rate of the last stream, shown in the welcome panel.
     #[serde(default)]
     pub last_session: Option<LastSession>,
+
+    /// Average video bandwidth really received during the last stream (Mbps)
+    #[serde(default)]
+    pub last_bandwidth_mbps: Option<u32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +57,7 @@ impl Default for Config {
             protocol_id: alvr_common::protocol_id(),
             height_offset_cm: 0,
             last_session: None,
+            last_bandwidth_mbps: None,
         }
     }
 }

@@ -53,6 +53,7 @@ Between streams the headset shows the AirFrameXR panel instead of the stock text
 - The AirFrameXR mark and name (no version number: every client works with every streamer of the 1.x line).
 - The connection status, with the pairing step in AirFrameXR's words: *On the PC, click Find headset... and pick this headset*.
 - **Last session**: the per-eye resolution and refresh rate of the previous stream, e.g. `3648 × 3200 @ 90 Hz`, stored on the headset.
+- **Bandwidth received** (average of the last stream) and the **Wi-Fi** band, signal and link speed.
 - **Floor height** (a compact block): the headset's own height above the floor (live), an offset of -50 to +50 cm in 1 cm steps (**-**, **+**,
   **Reset**, hold to repeat), and the height the game will see. The offset is saved on the headset and applied when the stream
   starts, by lowering the stream's stage space.

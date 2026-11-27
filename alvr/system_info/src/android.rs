@@ -256,3 +256,47 @@ pub fn get_battery_status() -> (f32, bool) {
 
     (level as f32 / scale as f32, plugged > 0)
 }
+
+/// The headset's current Wi-Fi link, for the welcome panel.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct WifiLink {
+    pub rssi_dbm: i32,
+    pub frequency_mhz: i32,
+    pub link_mbps: i32,
+}
+
+/// None when Wi-Fi is off, not connected (wired use) or the query fails.
+pub fn wifi_link() -> Option<WifiLink> {
+    let vm = vm();
+    let mut env = vm.attach_current_thread().ok()?;
+
+    let result = (|| -> Option<WifiLink> {
+        let wifi_manager = get_system_service(&mut env, "wifi");
+        let info = env
+            .call_method(
+                wifi_manager,
+                "getConnectionInfo",
+                "()Landroid/net/wifi/WifiInfo;",
+                &[],
+            )
+            .ok()?
+            .l()
+            .ok()?;
+        let mut int =
+            |name: &str| -> Option<i32> { env.call_method(&info, name, "()I", &[]).ok()?.i().ok() };
+        let rssi_dbm = int("getRssi")?;
+        let frequency_mhz = int("getFrequency")?;
+        let link_mbps = int("getLinkSpeed")?;
+        // -127 / -1: no Wi-Fi connection
+        (rssi_dbm > -127 && frequency_mhz > 0).then_some(WifiLink {
+            rssi_dbm,
+            frequency_mhz,
+            link_mbps,
+        })
+    })();
+
+    if result.is_none() {
+        env.exception_clear().ok();
+    }
+    result
+}

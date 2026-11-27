@@ -34,6 +34,7 @@ const ELECTRIC: Rgba = [20, 117, 255, 255];
 const CYAN: Rgba = [0, 230, 245, 255];
 const WHITE: Rgba = [244, 250, 255, 255];
 const MUTED: Rgba = [157, 180, 203, 255];
+const AMBER: Rgba = [255, 184, 64, 255];
 const BUTTON: Rgba = [18, 52, 92, 255];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -55,9 +56,9 @@ const fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Rect {
     Rect { x0, y0, x1, y1 }
 }
 
-const MINUS_RECT: Rect = rect(96.0, 716.0, 216.0, 816.0);
-const PLUS_RECT: Rect = rect(808.0, 716.0, 928.0, 816.0);
-const RESET_RECT: Rect = rect(784.0, 652.0, 928.0, 702.0);
+const MINUS_RECT: Rect = rect(96.0, 746.0, 216.0, 836.0);
+const PLUS_RECT: Rect = rect(808.0, 746.0, 928.0, 836.0);
+const RESET_RECT: Rect = rect(784.0, 684.0, 928.0, 728.0);
 
 fn button_rect(button: PanelButton) -> Rect {
     match button {
@@ -78,6 +79,10 @@ pub struct PanelState {
     pub offset_cm: i32,
     /// Per-eye width, height and refresh rate of the last stream
     pub last_session: Option<(u32, u32, u32)>,
+    /// Average video bandwidth really received during the last stream, Mbps
+    pub last_bandwidth_mbps: Option<u32>,
+    /// Wi-Fi link: frequency (MHz), signal (dBm), link speed (Mbps)
+    pub wifi: Option<(u32, i32, u32)>,
     pub hovered: Option<PanelButton>,
     pub pressed: Option<PanelButton>,
 }
@@ -303,6 +308,16 @@ impl Canvas {
     }
 }
 
+/// Signal word and colour for a Wi-Fi level in dBm (the usual Android thresholds)
+fn wifi_quality(dbm: i32) -> (&'static str, Rgba) {
+    match dbm {
+        -50.. => ("excellent", WHITE),
+        -60..=-51 => ("good", WHITE),
+        -70..=-61 => ("fair", AMBER),
+        _ => ("weak", AMBER),
+    }
+}
+
 const ICE_ISH: Rgba = [116, 247, 255, 255];
 
 fn font() -> FontRef<'static> {
@@ -344,26 +359,32 @@ pub(crate) fn render_static() -> Vec<u8> {
         VerticalAlign::Center,
     );
 
-    // Last session card
-    canvas.framed_round_rect(rect(60.0, 500.0, 964.0, 600.0), 40.0, 3.0, CARD, LINE);
-    canvas.draw_text(
-        &font,
-        "Last session",
-        40.0,
-        MUTED,
-        (96.0, 551.0),
-        HorizontalAlign::Left,
-        VerticalAlign::Center,
-    );
+    // Session card: last session, bandwidth received, Wi-Fi
+    canvas.framed_round_rect(rect(60.0, 450.0, 964.0, 650.0), 40.0, 3.0, CARD, LINE);
+    for (label, y) in [
+        ("Last session", 490.0),
+        ("Bandwidth received", 550.0),
+        ("Wi-Fi", 610.0),
+    ] {
+        canvas.draw_text(
+            &font,
+            label,
+            34.0,
+            MUTED,
+            (96.0, y),
+            HorizontalAlign::Left,
+            VerticalAlign::Center,
+        );
+    }
 
     // Height card
-    canvas.framed_round_rect(rect(60.0, 636.0, 964.0, 904.0), 40.0, 3.0, CARD, LINE);
+    canvas.framed_round_rect(rect(60.0, 672.0, 964.0, 904.0), 40.0, 3.0, CARD, LINE);
     canvas.draw_text(
         &font,
         "Floor height",
-        40.0,
+        38.0,
         WHITE,
-        (96.0, 677.0),
+        (96.0, 706.0),
         HorizontalAlign::Left,
         VerticalAlign::Center,
     );
@@ -372,7 +393,7 @@ pub(crate) fn render_static() -> Vec<u8> {
         "applies when the game starts",
         26.0,
         MUTED,
-        (350.0, 681.0),
+        (340.0, 710.0),
         HorizontalAlign::Left,
         VerticalAlign::Center,
     );
@@ -415,7 +436,7 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         &state.status,
         50.0,
         WHITE,
-        (512.0, 410.0),
+        (512.0, 375.0),
         HorizontalAlign::Center,
         VerticalAlign::Center,
     );
@@ -428,9 +449,9 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         } else {
             format!("{:+} cm", state.offset_cm)
         },
-        84.0,
+        76.0,
         if state.offset_cm == 0 { WHITE } else { CYAN },
-        (512.0, 766.0),
+        (512.0, 791.0),
         HorizontalAlign::Center,
         VerticalAlign::Center,
     );
@@ -444,32 +465,53 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
             ),
             None => "headset height: waiting for tracking".to_owned(),
         },
-        32.0,
+        30.0,
         MUTED,
-        (512.0, 860.0),
+        (512.0, 872.0),
         HorizontalAlign::Center,
         VerticalAlign::Center,
     );
-    // Last session
+    // Session card values
+    let value = |canvas: &mut Canvas, text: &str, color: Rgba, y: f32| {
+        canvas.draw_text(
+            &font,
+            text,
+            40.0,
+            color,
+            (928.0, y),
+            HorizontalAlign::Right,
+            VerticalAlign::Center,
+        )
+    };
     match state.last_session {
-        Some((w, h, hz)) => canvas.draw_text(
-            &font,
-            &format!("{w} × {h} @ {hz} Hz"),
-            52.0,
-            WHITE,
-            (928.0, 551.0),
-            HorizontalAlign::Right,
-            VerticalAlign::Center,
-        ),
-        None => canvas.draw_text(
-            &font,
-            "none yet",
-            44.0,
-            MUTED,
-            (928.0, 551.0),
-            HorizontalAlign::Right,
-            VerticalAlign::Center,
-        ),
+        Some((w, h, hz)) => value(&mut canvas, &format!("{w} × {h} @ {hz} Hz"), WHITE, 490.0),
+        None => value(&mut canvas, "none yet", MUTED, 490.0),
+    }
+    match state.last_bandwidth_mbps {
+        Some(mbps) => value(&mut canvas, &format!("{mbps} Mbps average"), WHITE, 550.0),
+        None => value(&mut canvas, "none yet", MUTED, 550.0),
+    }
+    match state.wifi {
+        Some((mhz, dbm, link)) => {
+            let band = match mhz {
+                0..=3000 => "2.4 GHz",
+                3001..=5900 => "5 GHz",
+                _ => "6 GHz",
+            };
+            let (quality, color) = wifi_quality(dbm);
+            let link = if link > 0 {
+                format!(" · {link} Mbps link")
+            } else {
+                String::new()
+            };
+            value(
+                &mut canvas,
+                &format!("{band} · {dbm} dBm {quality}{link}"),
+                color,
+                610.0,
+            )
+        }
+        None => value(&mut canvas, "not connected", MUTED, 610.0),
     }
     for button in [PanelButton::Minus, PanelButton::Plus, PanelButton::Reset] {
         canvas.draw_button(&font, button, state);
@@ -505,10 +547,14 @@ mod tests {
             headset_height_cm: Some(162),
             offset_cm: 5,
             last_session: Some((3648, 3200, 90)),
+            last_bandwidth_mbps: Some(412),
+            wifi: Some((5805, -52, 1201)),
             hovered: Some(PanelButton::Plus),
             ..Default::default()
         };
-        state.set_hud_message("1\nhostname: 1234.client\nIP: 192.168.1.50\n\nStreamer found, starting the stream");
+        state.set_hud_message(
+            "1\nhostname: 1234.client\nIP: 192.168.1.50\n\nStreamer found, starting the stream",
+        );
         std::fs::write(path, render(&render_static(), &state)).unwrap();
     }
 }
