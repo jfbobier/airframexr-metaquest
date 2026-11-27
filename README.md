@@ -10,7 +10,7 @@
 **The Quest client built for [AirFrameXR](https://github.com/jfbobier/AirFrameXR): wireless PC VR for NVIDIA cards, tuned end to
 end for performance.** One stream format, one streamer, nothing else to configure around.
 
-**Version 1.5.0 · Vulkan renderer · Quest 3 tested.** Quest Pro and Quest 2 are intended targets but have not been run (see
+**Version 1.5.1 · Vulkan renderer · Quest 3 tested.** Quest Pro and Quest 2 are intended targets but have not been run (see
 [What was tested](#what-was-tested)).
 
 <p align="center">
@@ -81,7 +81,7 @@ package name is `airframexr.client`, so it installs next to a stock ALVR client.
 it from the streamer ("Find headset...").
 
 ```
-adb install -r airframexr-quest-1.5.0.apk
+adb install -r airframexr-quest-1.5.1.apk
 ```
 
 Then start the AirFrameXR streamer on the PC and start the app (it appears as **AirFrameXR**). It pairs with the AirFrameXR streamer
@@ -101,7 +101,7 @@ cargo xtask build-client --release            # build/alvr_client_android/alvr_c
 ```
 
 The SPIR-V of the staging shaders is committed; `alvr/graphics/resources/compile_staging_shaders.sh` regenerates it with the NDK's
-`glslc`. The app version (1.5.0, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
+`glslc`. The app version (1.5.1, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
 `alvr/client_openxr/Cargo.toml`. The ALVR protocol version the streamer checks is `alvr_common`'s, still 20.14.1.
 
 ## Credits
