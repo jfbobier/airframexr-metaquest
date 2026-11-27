@@ -338,6 +338,11 @@ pub fn entry_point() {
                     }
                     ClientCoreEvent::StreamingStarted(config) => {
                         let config = ParsedStreamConfig::new(&config);
+                        alvr_client_core::set_last_session(alvr_client_core::LastSession {
+                            width: config.view_resolution.x,
+                            height: config.view_resolution.y,
+                            hz: config.refresh_rate_hint.round() as u32,
+                        });
 
                         let context = StreamContext::new(
                             Arc::clone(&core_context),
@@ -359,6 +364,7 @@ pub fn entry_point() {
                         }
 
                         stream_context = None;
+                        lobby.refresh_last_session();
                     }
                     ClientCoreEvent::Haptics {
                         device_id,

@@ -10,11 +10,11 @@
 **The Quest client built for [AirFrameXR](https://github.com/jfbobier/AirFrameXR): wireless PC VR for NVIDIA cards, tuned end to
 end for performance.** One stream format, one streamer, nothing else to configure around.
 
-**Version 1.3.0 · Vulkan renderer · Quest 3 tested.** Quest Pro and Quest 2 are intended targets but have not been run (see
+**Version 1.5.0 · Vulkan renderer · Quest 3 tested.** Quest Pro and Quest 2 are intended targets but have not been run (see
 [What was tested](#what-was-tested)).
 
 <p align="center">
-  <img src="QUEST_UI_panel_preview.png" alt="The AirFrameXR welcome panel in the headset: brand, 'Quest client 1.3 · Vulkan · ALVR 20.14.1', connection status and the floor-height control" width="420"><br>
+  <img src="QUEST_UI_panel_preview.png" alt="The AirFrameXR welcome panel in the headset: brand, connection status, last session and the floor-height control" width="420"><br>
   <sub>The welcome panel, as the code draws it (a PC render of the real rasteriser, not a headset screenshot).</sub>
 </p>
 
@@ -50,9 +50,10 @@ claims above about how it works are not claims about how many milliseconds it sa
 
 Between streams the headset shows the AirFrameXR panel instead of the stock text HUD ([`QUEST_UI.md`](QUEST_UI.md)):
 
-- The AirFrameXR mark and name, and `Quest client 1.3 · Vulkan · ALVR 20.14.1`.
+- The AirFrameXR mark and name (no version number: every client works with every streamer of the 1.x line).
 - The connection status, with the pairing step in AirFrameXR's words: *On the PC, click Find headset... and pick this headset*.
-- **Floor height**: the headset's own height above the floor (live), an offset of -50 to +50 cm in 1 cm steps (**-**, **+**,
+- **Last session**: the per-eye resolution and refresh rate of the previous stream, e.g. `3648 × 3200 @ 90 Hz`, stored on the headset.
+- **Floor height** (a compact block): the headset's own height above the floor (live), an offset of -50 to +50 cm in 1 cm steps (**-**, **+**,
   **Reset**, hold to repeat), and the height the game will see. The offset is saved on the headset and applied when the stream
   starts, by lowering the stream's stage space.
 - The headset's hostname and IP. Point with a controller ray and the trigger. The panel disappears when the stream starts.
@@ -66,7 +67,7 @@ By the author, on **one Meta Quest 3**, with the AirFrameXR streamer on an RTX 5
 - The welcome panel.
 - Controllers, in several different games.
 - The 1.0 build (pinch removed): runs well and the Vulkan rendering is reactive (the author's report, no measurements). 1.3.0 differs
-  from 1.0 by the version number and the panel subtitle only.
+  from 1.0 by the version number and the panel subtitle only. 1.5.0 changes the panel only (no version text, last session, smaller floor-height block); the panel layout was checked as a PC render, not yet on a headset.
 
 **Not tested, so do not assume it works:** Quest Pro, Quest 2 and Quest 3S; the floor-height offset in a game; the HSV chroma key; long
 sessions; wired (USB) use and the streamer's USB autolaunch; the Vulkan validation layers (no release build ran with them, so the
@@ -79,7 +80,7 @@ package name is `airframexr.client`, so it installs next to a stock ALVR client.
 it from the streamer ("Find headset...").
 
 ```
-adb install -r airframexr-quest-1.3.10.apk
+adb install -r airframexr-quest-1.5.0.apk
 ```
 
 Then start the AirFrameXR streamer on the PC and start the app (it appears as **AirFrameXR**). It pairs with the AirFrameXR streamer
@@ -99,7 +100,7 @@ cargo xtask build-client --release            # build/alvr_client_android/alvr_c
 ```
 
 The SPIR-V of the staging shaders is committed; `alvr/graphics/resources/compile_staging_shaders.sh` regenerates it with the NDK's
-`glslc`. The app version (1.3.10, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
+`glslc`. The app version (1.5.0, which cargo-apk turns into the Android `versionName`) is the `alvr_client_openxr` crate's version in
 `alvr/client_openxr/Cargo.toml`. The ALVR protocol version the streamer checks is `alvr_common`'s, still 20.14.1.
 
 ## Credits

@@ -8,7 +8,8 @@ The picture is the real rasteriser (`alvr/graphics/src/panel.rs`) run on a PC wi
 
 ## What it shows
 
-- **Header:** the AirFrameXR mark and name, `Quest client <our version> · Vulkan · ALVR <protocol version>`.
+- **Header:** the AirFrameXR mark and name, `Quest client · Vulkan` (no version text since 1.5.0).
+- **Last session:** per-eye resolution and refresh rate of the previous stream (`3648 × 3200 @ 90 Hz`, `none yet` before the first), saved in the client's `session.json` when a stream starts.
 - **Status:** the connection message (searching, connecting, stream starting, errors). The "Open ALVR ... click Trust" text is now "On the PC, click Find headset... and pick this headset", the AirFrameXR streamer's pairing step (`docs/INSTALL.md` of the AirFrameXR repo).
 - **Floor height**, the visionOS client's semantics: the headset's own height above the floor (live), a manual offset of -50..+50 cm in 1 cm steps (**-**, **+**, **Reset**; hold to repeat), and what the game will see (headset + offset).
 - **Small print:** hostname and IP of the headset.

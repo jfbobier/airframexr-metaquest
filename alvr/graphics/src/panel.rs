@@ -55,9 +55,9 @@ const fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Rect {
     Rect { x0, y0, x1, y1 }
 }
 
-const MINUS_RECT: Rect = rect(96.0, 668.0, 276.0, 828.0);
-const PLUS_RECT: Rect = rect(748.0, 668.0, 928.0, 828.0);
-const RESET_RECT: Rect = rect(392.0, 846.0, 632.0, 898.0);
+const MINUS_RECT: Rect = rect(96.0, 716.0, 216.0, 816.0);
+const PLUS_RECT: Rect = rect(808.0, 716.0, 928.0, 816.0);
+const RESET_RECT: Rect = rect(784.0, 652.0, 928.0, 702.0);
 
 fn button_rect(button: PanelButton) -> Rect {
     match button {
@@ -70,12 +70,14 @@ fn button_rect(button: PanelButton) -> Rect {
 /// Everything the panel shows. Compare two states to know if the texture has to be redrawn.
 #[derive(Clone, PartialEq, Default)]
 pub struct PanelState {
-    /// "AirFrameXR client <version>\nhostname: ..\nIP: .." (the lines before the status)
+    /// "<ALVR protocol version>\nhostname: ..\nIP: .." (the lines before the status)
     pub info: String,
     pub status: String,
     /// Height of the headset above the floor as the headset reports it, in cm
     pub headset_height_cm: Option<i32>,
     pub offset_cm: i32,
+    /// Per-eye width, height and refresh rate of the last stream
+    pub last_session: Option<(u32, u32, u32)>,
     pub hovered: Option<PanelButton>,
     pub pressed: Option<PanelButton>,
 }
@@ -271,7 +273,7 @@ impl Canvas {
         } else {
             (BUTTON, ELECTRIC, WHITE)
         };
-        self.framed_round_rect(r, 26.0, 4.0, fill, frame);
+        self.framed_round_rect(r, 24.0, 4.0, fill, frame);
 
         let (cx, cy) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
         // Minus and plus are drawn as bars, not glyphs: the same weight at any font
@@ -283,15 +285,15 @@ impl Canvas {
             );
         };
         match button {
-            PanelButton::Minus => bar(self, 76.0, 16.0),
+            PanelButton::Minus => bar(self, 56.0, 12.0),
             PanelButton::Plus => {
-                bar(self, 76.0, 16.0);
-                bar(self, 16.0, 76.0);
+                bar(self, 56.0, 12.0);
+                bar(self, 12.0, 56.0);
             }
             PanelButton::Reset => self.draw_text(
                 font,
                 "Reset",
-                38.0,
+                32.0,
                 ink,
                 (cx, cy),
                 HorizontalAlign::Center,
@@ -342,24 +344,36 @@ pub(crate) fn render_static() -> Vec<u8> {
         VerticalAlign::Center,
     );
 
+    // Last session card
+    canvas.framed_round_rect(rect(60.0, 500.0, 964.0, 600.0), 40.0, 3.0, CARD, LINE);
+    canvas.draw_text(
+        &font,
+        "Last session",
+        40.0,
+        MUTED,
+        (96.0, 551.0),
+        HorizontalAlign::Left,
+        VerticalAlign::Center,
+    );
+
     // Height card
-    canvas.framed_round_rect(rect(60.0, 580.0, 964.0, 916.0), 40.0, 3.0, CARD, LINE);
+    canvas.framed_round_rect(rect(60.0, 636.0, 964.0, 904.0), 40.0, 3.0, CARD, LINE);
     canvas.draw_text(
         &font,
         "Floor height",
-        46.0,
+        40.0,
         WHITE,
-        (96.0, 624.0),
+        (96.0, 677.0),
         HorizontalAlign::Left,
         VerticalAlign::Center,
     );
     canvas.draw_text(
         &font,
         "applies when the game starts",
-        30.0,
+        26.0,
         MUTED,
-        (928.0, 626.0),
-        HorizontalAlign::Right,
+        (350.0, 681.0),
+        HorizontalAlign::Left,
         VerticalAlign::Center,
     );
 
@@ -377,9 +391,6 @@ pub(crate) fn render_static() -> Vec<u8> {
     canvas.px
 }
 
-/// The AirFrameXR Quest client version (Cargo.toml has 1.3.0, the panel shows 1.3).
-const CLIENT_VERSION: &str = "1.3";
-
 /// The whole panel for `state`, over the static layer.
 pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
     let font = font();
@@ -387,16 +398,10 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         px: static_layer.to_vec(),
     };
 
-    // Subtitle: the info line starts with "AirFrameXR client <ALVR protocol version>"; shown as "Quest client <ours> · Vulkan · ALVR <protocol>"
-    let version = state
-        .info
-        .lines()
-        .next()
-        .and_then(|l| l.strip_prefix("AirFrameXR client "))
-        .unwrap_or("");
+    // Subtitle (no version: every client is compatible with every streamer)
     canvas.draw_text(
         &font,
-        &format!("Quest client {CLIENT_VERSION} · Vulkan · ALVR {version}").replace("  ", " "),
+        "Quest client · Vulkan",
         38.0,
         MUTED,
         (266.0, 206.0),
@@ -410,7 +415,7 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         &state.status,
         50.0,
         WHITE,
-        (512.0, 430.0),
+        (512.0, 410.0),
         HorizontalAlign::Center,
         VerticalAlign::Center,
     );
@@ -423,9 +428,9 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
         } else {
             format!("{:+} cm", state.offset_cm)
         },
-        104.0,
+        84.0,
         if state.offset_cm == 0 { WHITE } else { CYAN },
-        (512.0, 738.0),
+        (512.0, 766.0),
         HorizontalAlign::Center,
         VerticalAlign::Center,
     );
@@ -439,12 +444,33 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
             ),
             None => "headset height: waiting for tracking".to_owned(),
         },
-        36.0,
+        32.0,
         MUTED,
-        (512.0, 812.0),
+        (512.0, 860.0),
         HorizontalAlign::Center,
         VerticalAlign::Center,
     );
+    // Last session
+    match state.last_session {
+        Some((w, h, hz)) => canvas.draw_text(
+            &font,
+            &format!("{w} × {h} @ {hz} Hz"),
+            52.0,
+            WHITE,
+            (928.0, 551.0),
+            HorizontalAlign::Right,
+            VerticalAlign::Center,
+        ),
+        None => canvas.draw_text(
+            &font,
+            "none yet",
+            44.0,
+            MUTED,
+            (928.0, 551.0),
+            HorizontalAlign::Right,
+            VerticalAlign::Center,
+        ),
+    }
     for button in [PanelButton::Minus, PanelButton::Plus, PanelButton::Reset] {
         canvas.draw_button(&font, button, state);
     }
@@ -462,4 +488,27 @@ pub(crate) fn render(static_layer: &[u8], state: &PanelState) -> Vec<u8> {
     );
 
     canvas.px
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `PANEL_PREVIEW=out.rgba cargo test -p alvr_graphics panel_preview` writes the raw RGBA panel.
+    #[test]
+    fn panel_preview() {
+        let Ok(path) = std::env::var("PANEL_PREVIEW") else {
+            return;
+        };
+        let mut state = PanelState {
+            status: "Streamer found, starting the stream".into(),
+            headset_height_cm: Some(162),
+            offset_cm: 5,
+            last_session: Some((3648, 3200, 90)),
+            hovered: Some(PanelButton::Plus),
+            ..Default::default()
+        };
+        state.set_hud_message("1\nhostname: 1234.client\nIP: 192.168.1.50\n\nStreamer found, starting the stream");
+        std::fs::write(path, render(&render_static(), &state)).unwrap();
+    }
 }

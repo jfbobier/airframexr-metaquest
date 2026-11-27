@@ -37,6 +37,7 @@ use std::{
     time::Duration,
 };
 use storage::Config;
+pub use storage::LastSession;
 
 pub use logging_backend::init_logging;
 
@@ -55,6 +56,19 @@ pub fn set_height_offset_cm(offset_cm: i32) {
     config.height_offset_cm =
         offset_cm.clamp(*HEIGHT_OFFSET_RANGE_CM.start(), *HEIGHT_OFFSET_RANGE_CM.end());
     config.store();
+}
+
+/// Per-eye resolution and refresh rate of the last stream (None before the first one).
+pub fn last_session() -> Option<LastSession> {
+    Config::load().last_session
+}
+
+pub fn set_last_session(session: LastSession) {
+    let mut config = Config::load();
+    if config.last_session != Some(session) {
+        config.last_session = Some(session);
+        config.store();
+    }
 }
 
 pub enum ClientCoreEvent {

@@ -25,6 +25,17 @@ pub struct Config {
     /// raises the player in the game). 0 = the headset's reading as is.
     #[serde(default)]
     pub height_offset_cm: i32,
+
+    /// Per-eye resolution and refresh rate of the last stream, shown in the welcome panel.
+    #[serde(default)]
+    pub last_session: Option<LastSession>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LastSession {
+    pub width: u32,
+    pub height: u32,
+    pub hz: u32,
 }
 
 impl Default for Config {
@@ -41,6 +52,7 @@ impl Default for Config {
             ),
             protocol_id: alvr_common::protocol_id(),
             height_offset_cm: 0,
+            last_session: None,
         }
     }
 }

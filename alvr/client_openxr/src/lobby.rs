@@ -81,6 +81,7 @@ impl Lobby {
 
         let mut panel_state = PanelState {
             offset_cm: alvr_client_core::height_offset_cm(),
+            last_session: alvr_client_core::last_session().map(|s| (s.width, s.height, s.hz)),
             ..Default::default()
         };
         panel_state.set_hud_message(initial_hud_message);
@@ -127,6 +128,11 @@ impl Lobby {
     pub fn update_reference_space(&mut self) {
         self.reference_space =
             interaction::get_reference_space(&self.xr_session, self.reference_space_type);
+    }
+
+    pub fn refresh_last_session(&mut self) {
+        self.panel_state.last_session =
+            alvr_client_core::last_session().map(|s| (s.width, s.height, s.hz));
     }
 
     pub fn update_hud_message(&mut self, message: &str) {
